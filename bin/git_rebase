@@ -1,0 +1,15 @@
+#!/bin/sh -e
+#
+# Rebase (from upstream) a typical GitHub project where the repo is a fork.
+
+if git status --porcelain | grep .; then
+    echo "Commit or stash the changes first"
+    exit 1
+else
+    branch=`git rev-parse --abbrev-ref HEAD`
+    git checkout master
+    git fetch upstream
+    git rebase upstream/master
+    git checkout $branch
+    git rebase master
+fi

@@ -1,0 +1,4 @@
+# Glob pattern for files to find with the -S flag.
+source: '{*.{cc,c,cpp,hh,h,hpp,java,js,pl,PL,pm,pod,t,py,rb,cmake,rhtml,erb,yml},CMakeLists.txt}'
+# Regular expression for files and directories to exclude with the -X flag.
+exclude: '.svn/'

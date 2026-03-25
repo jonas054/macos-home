@@ -1,0 +1,3 @@
+#!/bin/sh
+
+python3 $HOME/Dropbox/home/src/autorun2.py "$@"

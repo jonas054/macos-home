@@ -1,0 +1,5 @@
+[alias]
+	co = checkout
+[user]
+	email = jonas054@gmail.com
+	name = Jonas Arvidsson
