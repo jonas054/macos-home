@@ -146,6 +146,10 @@
 (define-key global-map [S-right] 'windmove-right)
 (define-key global-map [S-up] 'windmove-up)
 (define-key global-map [S-down] 'windmove-down)
+(define-key global-map [C-S-left] 'shrink-window-horizontally)
+(define-key global-map [C-S-right] 'enlarge-window-horizontally)
+(define-key global-map [C-S-up] 'enlarge-window)
+(define-key global-map [C-S-down] 'shrink-window)
 
 (use-package copilot
   :ensure t
