@@ -117,12 +117,20 @@
 (define-key global-map [f6]   'set-night-colors)
 
 (defvar theme-cycle--index 0
-  "Index into `custom-available-themes' for the theme cycle.")
+  "Index into the filtered theme list for the theme cycle.")
+
+(defvar theme-cycle-blocklist '(light-blue)
+  "Themes excluded from the cycle.")
+
+(defun theme-cycle--themes ()
+  "Return available themes with `theme-cycle-blocklist' removed."
+  (cl-remove-if (lambda (th) (memq th theme-cycle-blocklist))
+                (custom-available-themes)))
 
 (defun theme-cycle--load (index)
   "Disable all active custom themes, then load the theme at INDEX."
   (mapc #'disable-theme custom-enabled-themes)
-  (let* ((themes (custom-available-themes))
+  (let* ((themes (theme-cycle--themes))
          (theme  (nth (mod index (length themes)) themes)))
     (setq theme-cycle--index (mod index (length themes)))
     (load-theme theme t)
