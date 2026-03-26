@@ -142,6 +142,10 @@
 (define-key global-map [C-f6] 'theme-cycle-next)
 (define-key global-map [f11]  'grep)
 (define-key global-map [f12]  'compile)
+(define-key global-map [S-left] 'windmove-left)
+(define-key global-map [S-right] 'windmove-right)
+(define-key global-map [S-up] 'windmove-up)
+(define-key global-map [S-down] 'windmove-down)
 
 (use-package copilot
   :ensure t
