@@ -148,6 +148,8 @@
 
 (define-key global-map [C-f5] 'theme-cycle-prev)
 (define-key global-map [C-f6] 'theme-cycle-next)
+
+(define-key global-map [f2]   'call-last-kbd-macro)
 (define-key global-map [f11]  'grep)
 (define-key global-map [f12]  'compile)
 (define-key global-map [S-left] 'windmove-left)
@@ -158,6 +160,42 @@
 (define-key global-map [C-S-right] 'enlarge-window-horizontally)
 (define-key global-map [C-S-up] 'enlarge-window)
 (define-key global-map [C-S-down] 'shrink-window)
+
+;; Change between hortizontal and vertical split.
+(require 'transpose-frame)
+(define-key global-map [f8]   'rotate-frame-clockwise)
+(define-key global-map [C-f8] 'flop-frame)
+(define-key global-map [M-f8] 'toggle-truncate-lines)
+
+(defun transpose-line-up ()
+  (interactive)
+  (transpose-lines 1)
+  (previous-line 2)
+  )
+(defun transpose-line-down ()
+  (next-line)
+  (interactive)
+  (transpose-lines 1)
+  (previous-line)
+  )
+
+(defun scroll-down-1 ()
+  (interactive)
+  (scroll-down 1))
+
+(defun scroll-up-1 ()
+  (interactive)
+  (scroll-up 1))
+
+(global-set-key (kbd "M-p") 'transpose-line-up)
+(global-set-key (kbd "M-n") 'transpose-line-down)
+
+(global-set-key [(meta up)] 'scroll-down-1) 
+(global-set-key [(meta down)]   'scroll-up-1)
+
+(require 'use-package)
+
+(require 'project)
 
 (use-package copilot
   :ensure t
