@@ -160,6 +160,10 @@
 (define-key global-map [C-S-right] 'enlarge-window-horizontally)
 (define-key global-map [C-S-up] 'enlarge-window)
 (define-key global-map [C-S-down] 'shrink-window)
+(global-set-key [(control f11)]   'isearch-toggle-case-fold)
+(global-set-key (kbd "C-.") 'dabbrev-expand) ;; M-/ takes 3 keys - too inconvenient!
+(global-set-key (kbd "C-#") 'comment-or-uncomment-region)
+(global-set-key (kbd "C-x C-b") 'electric-buffer-list)
 
 ;; Change between hortizontal and vertical split.
 (require 'transpose-frame)
