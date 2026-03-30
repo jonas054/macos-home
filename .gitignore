@@ -6,6 +6,7 @@
 .copilot/
 .dropbox/
 .emacs.d/.cache/
+.emacs.d/eln-cache/
 .emacs.d/elpa/
 .emacs.d/history
 .emacs.d/transient/history.el
