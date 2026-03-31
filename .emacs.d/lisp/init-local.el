@@ -18,8 +18,6 @@
                   (abbreviate-file-name buffer-file-name)
                 "%b")))
 
-(set-face-attribute 'default nil :height 140)
-
 (setq ediff-window-setup-function #'ediff-setup-windows-plain)
 
 (when (display-graphic-p)
@@ -36,7 +34,6 @@
 (recentf-mode 1)
 (savehist-mode 1)
 (save-place-mode 1)
-(global-display-line-numbers-mode 1)
 (global-auto-revert-mode 1)
 
 (ido-mode 1)
@@ -46,10 +43,15 @@
   (global-diff-hl-mode 1)
   (diff-hl-flydiff-mode))
 
+;; Line numbers, but not in terminal or shell buffers
+;; --------------------------------------------------------------------------------------
+(global-display-line-numbers-mode 1)
 (dolist (hook '(term-mode-hook
                 shell-mode-hook
                 eshell-mode-hook))
   (add-hook hook (lambda () (display-line-numbers-mode 0))))
+
+;; --------------------------------------------------------------------------------------
 
 (when (fboundp 'tool-bar-mode)
   (tool-bar-mode -1))
@@ -66,6 +68,9 @@
 (make-directory (expand-file-name "var/backups/" user-emacs-directory) t)
 (make-directory (expand-file-name "var/auto-save/sessions/" user-emacs-directory) t)
 
+;; Change between day and night colors
+;; --------------------------------------------------------------------------------------
+
 (defun set-day-colors ()
   (interactive)
   (set-foreground-color "black")
@@ -75,6 +80,15 @@
   (interactive)
   (set-background-color "black")
   (set-foreground-color "white"))
+
+(define-key global-map [f5]   'set-day-colors)
+(define-key global-map [f6]   'set-night-colors)
+
+;; Font zooming
+;; The default font size is 140 (14pt), so each zoom step changes the height by 10 (1pt).
+;; --------------------------------------------------------------------------------------
+
+(set-face-attribute 'default nil :height 140)
 
 (defvar global-font-zoom-level 0
   "Number of zoom steps from the default font size. Positive = larger.")
@@ -109,12 +123,8 @@
 (global-set-key (kbd "C-+") #'global-font-size-increase)
 (global-set-key (kbd "C--") #'global-font-size-decrease)
 
-(define-key global-map [f1]   'next-error)
-(global-set-key [(shift f1)]  'previous-error)
-(define-key global-map [f3]   'previous-error) ; in some XEmacs versions, shift in not recognized
-
-(define-key global-map [f5]   'set-day-colors)
-(define-key global-map [f6]   'set-night-colors)
+;; Theme cycling
+;; ---------------------------------------------------------------------------------------
 
 (defvar theme-cycle--index 0
   "Index into the filtered theme list for the theme cycle.")
@@ -149,6 +159,13 @@
 (define-key global-map [C-f5] 'theme-cycle-prev)
 (define-key global-map [C-f6] 'theme-cycle-next)
 
+;; Key mapping
+;; ---------------------------------------------------------------------------------------
+
+(define-key global-map [f1]   'next-error)
+(global-set-key [(shift f1)]  'previous-error)
+(define-key global-map [f3]   'previous-error) ; in some XEmacs versions, shift in not recognized
+
 (define-key global-map [f2]   'call-last-kbd-macro)
 (define-key global-map [f11]  'grep)
 (define-key global-map [f12]  'compile)
@@ -171,17 +188,28 @@
 (define-key global-map [C-f8] 'flop-frame)
 (define-key global-map [M-f8] 'toggle-truncate-lines)
 
+;; Transpose lines (i.e., switch current and adjacent line) up and
+;; down.  This effectively allows moving the current line up or down
+;; by one line, without needing to select or kill the whole line
+;; first, thus not affecting the kill-ring.
+;; --------------------------------------------------------------------------------
+
 (defun transpose-line-up ()
   (interactive)
   (transpose-lines 1)
-  (previous-line 2)
-  )
+  (previous-line 2))
+
 (defun transpose-line-down ()
   (interactive)
   (next-line)
   (transpose-lines 1)
-  (previous-line)
-  )
+  (previous-line))
+
+(global-set-key (kbd "M-p") 'transpose-line-up)
+(global-set-key (kbd "M-n") 'transpose-line-down)
+
+;; Scroll up and down by 1 line
+;; --------------------------------------------------------------------------------
 
 (defun scroll-down-1 ()
   (interactive)
@@ -191,11 +219,10 @@
   (interactive)
   (scroll-up 1))
 
-(global-set-key (kbd "M-p") 'transpose-line-up)
-(global-set-key (kbd "M-n") 'transpose-line-down)
-
 (global-set-key [(meta up)] 'scroll-down-1) 
-(global-set-key [(meta down)]   'scroll-up-1)
+(global-set-key [(meta down)] 'scroll-up-1)
+
+;; --------------------------------------------------------------------------------
 
 (require 'use-package)
 
