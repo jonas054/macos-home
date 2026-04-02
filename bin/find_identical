@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+
+Dir['**/*']
+  .select { |path| File.file?(path) }
+  .group_by { |path| File.basename(path) }
+  .values
+  .select { |files| files.size > 1 }
+  .each do |files|
+  files.sort!
+  files.each_with_index do |f, ix|
+    puts "rm #{f}" if ix > 0 && File.read(f).sum == File.read(files[ix - 1]).sum
+  end
+end

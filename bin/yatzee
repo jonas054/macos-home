@@ -1,0 +1,164 @@
+#!/usr/bin/env ruby
+# coding: utf-8
+# frozen_string_literal: true
+
+faces = <<~TEXT
+  .-------.
+  |       |
+  |       |
+  |       |
+  |   *   |
+  |       |
+  |       |
+  |       |
+  `-------´
+  .-------.
+  |       |
+  |     * |
+  |       |
+  |       |
+  |       |
+  | *     |
+  |       |
+  `-------´
+  .-------.
+  |       |
+  |     * |
+  |       |
+  |   *   |
+  |       |
+  | *     |
+  |       |
+  `-------´
+  .-------.
+  |       |
+  | *   * |
+  |       |
+  |       |
+  |       |
+  | *   * |
+  |       |
+  `-------´
+  .-------.
+  |       |
+  | *   * |
+  |       |
+  |   *   |
+  |       |
+  | *   * |
+  |       |
+  `-------´
+  .-------.
+  |       |
+  | *   * |
+  |       |
+  | *   * |
+  |       |
+  | *   * |
+  |       |
+  `-------´
+TEXT
+
+SCORE_SHEET = {
+  # '1:or' => nil,
+  # '2:or' => nil,
+  # '3:or' => nil,
+  # '4:or' => nil,
+  # '5:or' => nil,
+  # '6:or' => nil,
+  # 'Yatzy'
+  # 'Liten stege'
+  # 'Stor stege'
+  # 'Fyrtal'
+  # 'Kåk'
+  # 'Tretal'
+  # 'Två par'
+  # 'Par'
+  # 'Chans', total]
+}
+FACE_MAP = (1..6).map { |nr| [nr, faces.lines[(nr - 1) * 9, 9]] }.to_h
+
+def side_by_side(dices, new_dice)
+  dices.zip(new_dice).map { |lines| lines.first.chomp + '  ' + lines.last }
+end
+
+def show(values)
+  all = FACE_MAP[values.first]
+  (values.size - 1).times { |i| all = side_by_side(all, FACE_MAP[values[i + 1]]) }
+  puts (1..values.size).map { |i| "     #{i}     " }.join,
+       all.join("")
+         .gsub(/-/, '--')
+         .gsub(/ /, '  ')
+         .gsub(/\*/, '⬤ ')
+end
+
+def evaluate(values)
+  grouped = values.group_by(&:to_i).values
+  max_length = grouped.map(&:length).max
+  alt = grouped.select { |v| v.length == max_length && max_length > 1 }
+          .map { |i| [i.first, sum(i)] }
+          .map { |n ,s| ["#{n}:or", s] }
+          .sort
+  name, score = name_and_score(values.sort, grouped)
+  choices = alt
+  choices = [[name, score]] + choices unless SCORE_SHEET.key?(name)
+  choices.reject { |n, _| SCORE_SHEET.key?(n) }
+end
+
+def name_and_score(values, grouped)
+  total = sum(values)
+  if values.uniq.size == 1
+    ['Yatzy', 50]
+  elsif values == [1, 2, 3, 4, 5]
+    ['Liten stege', total]
+  elsif values == [2, 3, 4, 5, 6]
+    ['Stor stege', total]
+  else
+    four_of_a_kind = same(grouped, 4).first
+    if four_of_a_kind
+      ['Fyrtal', sum(four_of_a_kind)]
+    else
+      pairs = same(grouped, 2)
+      three_of_a_kind = same(grouped, 3).first
+      if three_of_a_kind
+        pairs.any? ? ['Kåk', total] : ['Tretal', sum(three_of_a_kind)]
+      elsif pairs.any?
+        [pairs.size == 2 ? 'Två par' : 'Par', sum(pairs.map { |x| sum(x) })]
+      else
+        ['Chans', total]
+      end
+    end
+  end
+end
+
+def sum(values)
+  values.inject(:+)
+end
+
+def same(grouped, length)
+  grouped.select { |x| x.length == length }
+end
+
+def throw_dice(how_many)
+  how_many.times.map { rand(1..6) }
+end
+
+dice_to_throw = 5
+kept_dice = []
+3.times do |i|
+  result = kept_dice + throw_dice(dice_to_throw)
+  show(result)
+  choices = evaluate(result)
+  puts choices.map { |name, score| "#{name} (#{score})" }.join(' / ')
+  if i == 2
+    print 'Välj: '
+    choice = $stdin.gets.chomp
+    break
+  end
+
+  print 'Spara: '
+  save_positions = $stdin.gets.chomp.split(//).map { |s| s.to_i - 1 }
+
+  kept_dice = result.values_at(*save_positions).sort
+  dice_to_throw = 5 - kept_dice.size
+end

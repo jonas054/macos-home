@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""
+sessions_overview - Generate an HTML overview of all Copilot session events.html files.
+
+Reads all ~/.copilot/session-state/*/events.html files and produces
+~/.copilot/session-state/sessions-overview.html with links and first user prompts.
+"""
+
+import glob
+import html
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+ABBREV_LEN = 200
+OUTPUT_FILE = Path.home() / ".copilot" / "session-state" / "sessions-overview.html"
+
+
+def escape(text: str) -> str:
+    return html.escape(str(text)) if text is not None else ""
+
+
+def parse_ts(ts_str: str):
+    if not ts_str:
+        return None
+    try:
+        return datetime.fromisoformat(ts_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def fmt_ts(ts_str: str) -> str:
+    dt = parse_ts(ts_str)
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else (ts_str or "")
+
+
+def abbreviate(text: str, max_len: int = ABBREV_LEN) -> str:
+    text = text.strip().replace("\n", " ").replace("\r", "")
+    # collapse whitespace
+    while "  " in text:
+        text = text.replace("  ", " ")
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "…"
+
+
+def read_session(session_dir: Path) -> dict:
+    """Extract metadata from a session directory."""
+    info = {
+        "id": session_dir.name,
+        "events_html": session_dir / "events.html",
+        "start_time": "",
+        "cwd": "",
+        "first_prompt": "",
+        "model": "",
+    }
+
+    jsonl_path = session_dir / "events.jsonl"
+    if not jsonl_path.exists():
+        return info
+
+    try:
+        with open(jsonl_path, encoding="utf-8") as f:
+            for raw_line in f:
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    event = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+
+                etype = event.get("type", "")
+                data = event.get("data", {})
+
+                if etype == "session.start":
+                    info["start_time"] = data.get("startTime", event.get("timestamp", ""))
+                    info["cwd"] = data.get("context", {}).get("cwd", "")
+                    info["model"] = data.get("selectedModel", "")
+
+                elif etype == "user.message" and not info["first_prompt"]:
+                    content = data.get("content", "")
+                    if content:
+                        info["first_prompt"] = abbreviate(content)
+
+                elif not info["model"] and "model" in data:
+                    info["model"] = data["model"]
+
+                # stop once we have everything
+                if info["start_time"] and info["first_prompt"] and info["model"]:
+                    break
+    except OSError:
+        pass
+
+    return info
+
+
+_CSS = """
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+  line-height: 1.6;
+  font-size: 14px;
+}
+.container { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+.overview-section {
+  background: white;
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 28px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.page-title { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
+.page-meta { color: #64748b; font-size: 13px; margin-bottom: 16px; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }
+.search-bar {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  background: #f8fafc;
+  transition: border-color .15s;
+}
+.search-bar:focus { border-color: #6366f1; background: white; }
+.btn {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { background: #e2e8f0; }
+.sessions-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sessions-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 2px solid #e2e8f0;
+  color: #475569;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.sessions-table th:hover { color: #1e293b; }
+.sessions-table th.sort-active { color: #6366f1; }
+.sort-ind { opacity: .55; }
+.sessions-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+.data-row:hover td { background: #f8fafc; }
+.ts { white-space: nowrap; color: #64748b; font-variant-numeric: tabular-nums; }
+.cwd { white-space: nowrap; color: #64748b; font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.model { white-space: nowrap; color: #7c3aed; font-size: 12px; }
+.prompt { color: #334155; }
+.prompt a { color: inherit; text-decoration: none; }
+.prompt a:hover { color: #2563eb; text-decoration: underline; }
+.group-header td {
+  background: #f1f5f9;
+  padding: 7px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.group-header:hover td { background: #e2e8f0; }
+.group-toggle { display: inline-block; width: 14px; font-size: 10px; color: #64748b; }
+.group-count { color: #94a3b8; font-weight: normal; margin-left: 6px; font-size: 11px; }
+"""
+
+_JS = """
+const DATA = __DATA__;
+let sortCol = 0;   // 0=ts, 1=cwd, 2=model, 3=prompt
+let sortAsc = false;
+let query = '';
+const collapsed = new Set();
+
+function getGroupKey(item, col) {
+  if (col === 0) return item.ts.slice(0, 10);       // YYYY-MM-DD
+  if (col === 1) return item.cwd || '(none)';
+  if (col === 2) return item.model || '(unknown)';
+  // prompt: first 6 words as group key
+  const words = (item.prompt || '').trim().split(/\\s+/);
+  return words.slice(0, 6).join(' ') + (words.length > 6 ? '…' : '') || '(empty)';
+}
+
+function getSortVal(item, col) {
+  if (col === 0) return item.ts_raw;
+  if (col === 1) return (item.cwd || '').toLowerCase();
+  if (col === 2) return (item.model || '').toLowerCase();
+  if (col === 3) return (item.prompt || '').toLowerCase();
+  return '';
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function toggleGroup(gk) {
+  if (collapsed.has(gk)) collapsed.delete(gk); else collapsed.add(gk);
+  render();
+}
+
+function render() {
+  const q = query.toLowerCase();
+  const filtered = DATA.filter(item =>
+    !q ||
+    item.ts.includes(q) ||
+    (item.cwd    || '').toLowerCase().includes(q) ||
+    (item.model  || '').toLowerCase().includes(q) ||
+    (item.prompt || '').toLowerCase().includes(q)
+  );
+
+  filtered.sort((a, b) => {
+    const av = getSortVal(a, sortCol), bv = getSortVal(b, sortCol);
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return sortAsc ? cmp : -cmp;
+  });
+
+  const useGroups = true;
+  const groupCounts = {};
+  if (useGroups) {
+    filtered.forEach(item => {
+      const gk = getGroupKey(item, sortCol);
+      groupCounts[gk] = (groupCounts[gk] || 0) + 1;
+    });
+  }
+
+  const frag = document.createDocumentFragment();
+  let curGroup;
+
+  filtered.forEach(item => {
+    const gk = useGroups ? getGroupKey(item, sortCol) : null;
+
+    if (gk !== null && gk !== curGroup) {
+      curGroup = gk;
+      const isCollapsed = collapsed.has(gk);
+      const cnt = groupCounts[gk];
+      const tr = document.createElement('tr');
+      tr.className = 'group-header';
+      tr.dataset.group = gk;
+      tr.innerHTML =
+        `<td colspan="4">` +
+        `<span class="group-toggle">${isCollapsed ? '\\u25b6' : '\\u25bc'}</span> ` +
+        `<strong>${escHtml(gk)}</strong>` +
+        `<span class="group-count">${cnt} session${cnt === 1 ? '' : 's'}</span></td>`;
+      tr.addEventListener('click', () => toggleGroup(gk));
+      frag.appendChild(tr);
+    }
+
+    if (!useGroups || !collapsed.has(gk)) {
+      const tr = document.createElement('tr');
+      tr.className = 'data-row';
+      if (gk !== null) tr.dataset.group = gk;
+      const promptHtml = item.prompt ? escHtml(item.prompt) : '<em>\\u2014</em>';
+      tr.innerHTML =
+        `<td class="ts">${escHtml(item.ts)}</td>` +
+        `<td class="cwd" title="${escHtml(item.cwd)}">${escHtml(item.cwd_display)}</td>` +
+        `<td class="model">${escHtml(item.model)}</td>` +
+        `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
+      frag.appendChild(tr);
+    }
+  });
+
+  document.querySelector('#sessions-table tbody').replaceChildren(frag);
+
+  document.querySelectorAll('#sessions-table th[data-col]').forEach(th => {
+    const col = parseInt(th.dataset.col);
+    th.classList.toggle('sort-active', col === sortCol);
+    th.querySelector('.sort-ind').textContent =
+      col !== sortCol ? ' \\u2195' : sortAsc ? ' \\u2191' : ' \\u2193';
+  });
+}
+
+document.querySelectorAll('#sessions-table th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = parseInt(th.dataset.col);
+    if (col === sortCol) { sortAsc = !sortAsc; }
+    else { sortCol = col; sortAsc = col !== 0; }
+    render();
+  });
+});
+
+document.getElementById('search').addEventListener('input', e => {
+  query = e.target.value;
+  render();
+});
+
+document.getElementById('btn-expand').addEventListener('click', () => {
+  collapsed.clear();
+  render();
+});
+
+document.getElementById('btn-collapse').addEventListener('click', () => {
+  const q = query.toLowerCase();
+  DATA.filter(item =>
+    !q ||
+    item.ts.includes(q) ||
+    (item.cwd    || '').toLowerCase().includes(q) ||
+    (item.model  || '').toLowerCase().includes(q) ||
+    (item.prompt || '').toLowerCase().includes(q)
+  ).forEach(item => {
+    const gk = getGroupKey(item, sortCol);
+    if (gk !== null) collapsed.add(gk);
+  });
+  render();
+});
+
+render();
+"""
+
+
+def build_html(sessions: list) -> str:
+    home = str(Path.home())
+    data = []
+    for s in sessions:
+        cwd = s["cwd"]
+        cwd_display = "/".join(cwd.replace(home, "~").split("/")[-2:]) if cwd else ""
+        data.append({
+            "ts": fmt_ts(s["start_time"]),
+            "ts_raw": s["start_time"],
+            "cwd": cwd,
+            "cwd_display": cwd_display,
+            "model": s["model"],
+            "prompt": s["first_prompt"],
+            "link": str(s["events_html"]),
+        })
+
+    data_json = json.dumps(data, ensure_ascii=False)
+    js = _JS.replace("__DATA__", data_json)
+    count = len(sessions)
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Copilot Sessions Overview</title>
+  <style>{_CSS}</style>
+</head>
+<body>
+  <div class="container">
+    <div class="overview-section">
+      <h1 class="page-title">🤖 Copilot Sessions</h1>
+      <p class="page-meta">{count} sessions &nbsp;·&nbsp; generated {generated}</p>
+      <div class="toolbar">
+        <input class="search-bar" type="search" placeholder="Filter by prompt, directory, or model…" id="search" autofocus>
+        <button class="btn" id="btn-expand">Expand all</button>
+        <button class="btn" id="btn-collapse">Collapse all</button>
+      </div>
+      <table class="sessions-table" id="sessions-table">
+        <thead>
+          <tr>
+            <th data-col="0">Started <span class="sort-ind"> ↓</span></th>
+            <th data-col="1">Directory <span class="sort-ind"> ↕</span></th>
+            <th data-col="2">Model <span class="sort-ind"> ↕</span></th>
+            <th data-col="3">First prompt <span class="sort-ind"> ↕</span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <script>{js}</script>
+</body>
+</html>
+"""
+
+
+def main():
+    pattern = str(Path.home() / ".copilot" / "session-state" / "*" / "events.html")
+    paths = sorted(glob.glob(pattern))
+
+    if not paths:
+        print("No events.html files found.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Found {len(paths)} session(s)…", file=sys.stderr)
+
+    sessions = []
+    for p in paths:
+        session_dir = Path(p).parent
+        info = read_session(session_dir)
+        sessions.append(info)
+
+    # sort newest first
+    sessions.sort(key=lambda s: s["start_time"] or "", reverse=True)
+
+    html_content = build_html(sessions)
+
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_FILE.write_text(html_content, encoding="utf-8")
+    print(f"Wrote: {OUTPUT_FILE}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

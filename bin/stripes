@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+
+require 'rainbow'
+
+ARGF.read.lines.each_with_index do |line, ix|
+  puts ix % 2 == 0 ? Rainbow(line.chomp).yellow : line
+end

@@ -1,0 +1,1416 @@
+#!/usr/bin/env python3
+"""
+session_viewer - Render Copilot session events.jsonl file(s) as beautiful HTML.
+
+Usage:
+    session_viewer                         # process all ~/.copilot/session-state/*/events.jsonl
+    session_viewer <path-to-events.jsonl>  # process a single file
+    session_viewer -o <output.html> <path> # single file with explicit output path
+
+When processing a single file, --output/-o sets the output path (default: events.html
+next to the input file).
+
+When processing multiple files (no argument), each events.jsonl is rendered in-place
+as events.html in its own directory.
+"""
+
+import argparse
+import glob as _glob
+import html
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def parse_ts(ts_str: str) -> datetime:
+    if not ts_str:
+        return None
+    ts_str = ts_str.rstrip("Z")
+    try:
+        return datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def fmt_ts(ts_str: str) -> str:
+    dt = parse_ts(ts_str)
+    return dt.strftime("%H:%M:%S") if dt else ts_str
+
+
+def fmt_duration(ms: int) -> str:
+    if ms is None:
+        return "?"
+    s = ms / 1000
+    if s < 60:
+        return f"{s:.1f}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{int(m)}m {int(s)}s"
+    h, m = divmod(m, 60)
+    return f"{int(h)}h {int(m)}m {int(s)}s"
+
+
+def fmt_number(n) -> str:
+    if n is None:
+        return "0"
+    return f"{n:,}"
+
+
+def escape(text: str) -> str:
+    return html.escape(str(text)) if text is not None else ""
+
+
+def json_html(obj) -> str:
+    """Return syntax-highlighted JSON as HTML."""
+    text = json.dumps(obj, indent=2, ensure_ascii=False)
+    result = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        # strings
+        if ch == '"':
+            j = i + 1
+            while j < len(text):
+                if text[j] == '\\':
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            token = text[i:j]
+            # key or value?
+            rest = text[j:].lstrip()
+            if rest.startswith(':'):
+                result.append(f'<span class="jk">{escape(token)}</span>')
+            else:
+                result.append(f'<span class="js">{escape(token)}</span>')
+            i = j
+        elif ch in '0123456789-':
+            j = i + 1
+            while j < len(text) and text[j] in '0123456789.eE+-':
+                j += 1
+            result.append(f'<span class="jn">{escape(text[i:j])}</span>')
+            i = j
+        elif text[i:i+4] == 'true':
+            result.append('<span class="jb">true</span>')
+            i += 4
+        elif text[i:i+5] == 'false':
+            result.append('<span class="jb">false</span>')
+            i += 5
+        elif text[i:i+4] == 'null':
+            result.append('<span class="jnull">null</span>')
+            i += 4
+        elif ch in '{}[],:':
+            result.append(f'<span class="jp">{escape(ch)}</span>')
+            i += 1
+        else:
+            result.append(escape(ch))
+            i += 1
+    return ''.join(result)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Summarise what happened in the session
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_overview(events: list) -> dict:
+    overview = {
+        "session_id": None,
+        "copilot_version": None,
+        "start_time": None,
+        "end_time": None,
+        "duration_ms": None,
+        "cwd": None,
+        "branch": None,
+        "head_commit": None,
+        "shutdown_type": None,
+        "total_premium_requests": 0,
+        "total_api_duration_ms": None,
+        "files_modified": [],
+        "lines_added": 0,
+        "lines_removed": 0,
+        "model_metrics": {},
+        "event_counts": {},
+        "user_messages": [],
+        "tools_used": {},
+        "intents": [],
+        "subagents": [],
+    }
+
+    for ev in events:
+        t = ev.get("type", "")
+        d = ev.get("data", {})
+        overview["event_counts"][t] = overview["event_counts"].get(t, 0) + 1
+
+        if t == "session.start":
+            overview["session_id"] = d.get("sessionId")
+            overview["copilot_version"] = d.get("copilotVersion")
+            overview["start_time"] = ev.get("timestamp")
+            ctx = d.get("context", {})
+            overview["cwd"] = ctx.get("cwd")
+            overview["branch"] = ctx.get("branch")
+            overview["head_commit"] = ctx.get("headCommit")
+
+        elif t == "user.message":
+            overview["user_messages"].append(d.get("content", ""))
+
+        elif t == "session.shutdown":
+            overview["end_time"] = ev.get("timestamp")
+            overview["shutdown_type"] = d.get("shutdownType")
+            overview["total_premium_requests"] = d.get("totalPremiumRequests", 0)
+            overview["total_api_duration_ms"] = d.get("totalApiDurationMs")
+            code = d.get("codeChanges", {})
+            overview["files_modified"] = code.get("filesModified", [])
+            overview["lines_added"] = code.get("linesAdded", 0)
+            overview["lines_removed"] = code.get("linesRemoved", 0)
+            overview["model_metrics"] = d.get("modelMetrics", {})
+
+        elif t == "tool.execution_start":
+            name = d.get("toolName", "")
+            if name and name != "report_intent":
+                overview["tools_used"][name] = overview["tools_used"].get(name, 0) + 1
+            if name == "report_intent":
+                intent = d.get("arguments", {}).get("intent")
+                if intent:
+                    overview["intents"].append(intent)
+
+        elif t == "subagent.started":
+            overview["subagents"].append({
+                "name": d.get("agentDisplayName", d.get("agentName", "")),
+                "ts": ev.get("timestamp"),
+            })
+
+    # Calculate duration
+    if overview["start_time"] and overview["end_time"]:
+        s = parse_ts(overview["start_time"])
+        e = parse_ts(overview["end_time"])
+        if s and e:
+            overview["duration_ms"] = int((e - s).total_seconds() * 1000)
+
+    return overview
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build conversation turns
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_turns(events: list) -> list:
+    """
+    Return a list of logical conversation turns.  Each turn is a dict:
+        {user_message, assistant_steps}
+    An assistant_step is one of:
+        {kind:'text', content}
+        {kind:'tool', name, args, result, success, ts_start, ts_end, intentSummary}
+        {kind:'subagent', name, ts_start, ts_end}
+    """
+    # Index executions by toolCallId
+    exec_starts = {}   # toolCallId -> event
+    exec_ends = {}     # toolCallId -> event
+    subagent_starts = {}  # toolCallId -> event
+    subagent_ends = {}    # toolCallId -> event
+
+    for ev in events:
+        t = ev.get("type", "")
+        d = ev.get("data", {})
+        cid = d.get("toolCallId")
+        if t == "tool.execution_start" and cid:
+            exec_starts[cid] = ev
+        elif t == "tool.execution_complete" and cid:
+            exec_ends[cid] = ev
+        elif t == "subagent.started" and cid:
+            subagent_starts[cid] = ev
+        elif t == "subagent.completed" and cid:
+            subagent_ends[cid] = ev
+
+    turns = []
+    current_user_msg = None
+    current_steps = []
+    current_text_parts = []
+
+    def flush_text():
+        nonlocal current_text_parts
+        if current_text_parts:
+            text = "\n".join(current_text_parts).strip()
+            if text:
+                current_steps.append({"kind": "text", "content": text})
+        current_text_parts = []
+
+    def flush_turn():
+        nonlocal current_user_msg, current_steps, current_text_parts
+        flush_text()
+        if current_user_msg is not None or current_steps:
+            turns.append({
+                "user_message": current_user_msg,
+                "steps": current_steps,
+            })
+        current_user_msg = None
+        current_steps = []
+        current_text_parts = []
+
+    for ev in events:
+        t = ev.get("type", "")
+        d = ev.get("data", {})
+
+        if t == "user.message":
+            flush_turn()
+            current_user_msg = {
+                "content": d.get("content", ""),
+                "timestamp": ev.get("timestamp"),
+                "interaction_id": d.get("interactionId"),
+            }
+
+        elif t == "assistant.message":
+            text = d.get("content", "").strip()
+            if text:
+                current_text_parts.append(text)
+
+            # Tool requests embedded in the message
+            for tr in d.get("toolRequests", []):
+                if tr.get("name") == "report_intent":
+                    continue  # internal plumbing, skip
+                flush_text()
+                cid = tr.get("toolCallId")
+                end_ev = exec_ends.get(cid, {})
+                end_d = end_ev.get("data", {})
+                start_ev = exec_starts.get(cid, {})
+
+                # subagent?
+                sub_start = subagent_starts.get(cid)
+                sub_end = subagent_ends.get(cid)
+                if sub_start:
+                    current_steps.append({
+                        "kind": "subagent",
+                        "name": sub_start.get("data", {}).get("agentDisplayName", tr.get("name")),
+                        "arguments": tr.get("arguments", {}),
+                        "ts_start": sub_start.get("timestamp"),
+                        "ts_end": sub_end.get("timestamp") if sub_end else None,
+                        "result": end_d.get("result"),
+                        "success": end_d.get("success", True),
+                    })
+                else:
+                    current_steps.append({
+                        "kind": "tool",
+                        "name": tr.get("name", ""),
+                        "arguments": tr.get("arguments", {}),
+                        "intent_summary": tr.get("intentionSummary"),
+                        "ts_start": start_ev.get("timestamp"),
+                        "ts_end": end_ev.get("timestamp"),
+                        "result": end_d.get("result"),
+                        "success": end_d.get("success", True),
+                    })
+
+    flush_turn()
+    return turns
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTML generation
+# ─────────────────────────────────────────────────────────────────────────────
+
+TOOL_ICONS = {
+    "bash": "⚙️",
+    "view": "📄",
+    "edit": "✏️",
+    "create": "🆕",
+    "grep": "🔍",
+    "glob": "🗂️",
+    "task": "🤖",
+    "sql": "🗃️",
+    "ask_user": "💬",
+    "web_search": "🌐",
+    "web_fetch": "🌐",
+    "report_intent": "🎯",
+    "read_bash": "📤",
+    "write_bash": "📥",
+    "stop_bash": "🛑",
+    "list_bash": "📋",
+    "read_agent": "📡",
+    "list_agents": "📡",
+}
+
+TOOL_COLORS = {
+    "bash": "#e8f4fd",
+    "view": "#f0fdf4",
+    "edit": "#fff7ed",
+    "create": "#fdf4ff",
+    "grep": "#fefce8",
+    "glob": "#fefce8",
+    "task": "#f0f9ff",
+    "sql": "#f5f3ff",
+    "ask_user": "#fff1f2",
+    "web_search": "#f0fdf4",
+    "web_fetch": "#f0fdf4",
+    "default": "#f8fafc",
+}
+
+TOOL_BORDER_COLORS = {
+    "bash": "#3b82f6",
+    "view": "#22c55e",
+    "edit": "#f97316",
+    "create": "#a855f7",
+    "grep": "#eab308",
+    "glob": "#eab308",
+    "task": "#0ea5e9",
+    "sql": "#8b5cf6",
+    "ask_user": "#f43f5e",
+    "web_search": "#10b981",
+    "web_fetch": "#10b981",
+    "default": "#94a3b8",
+}
+
+
+def tool_icon(name: str) -> str:
+    return TOOL_ICONS.get(name, "🔧")
+
+
+def tool_bg(name: str) -> str:
+    return TOOL_COLORS.get(name, TOOL_COLORS["default"])
+
+
+def tool_border(name: str) -> str:
+    return TOOL_BORDER_COLORS.get(name, TOOL_BORDER_COLORS["default"])
+
+
+def render_tool_result(result) -> str:
+    if result is None:
+        return "<em>No result</em>"
+    if isinstance(result, dict):
+        content = result.get("content") or result.get("detailedContent")
+        if content and isinstance(content, str) and len(content) > 0:
+            return f'<pre class="result-pre">{escape(content[:4000])}{"..." if len(content) > 4000 else ""}</pre>'
+        return f'<div class="json-block">{json_html(result)}</div>'
+    return f'<pre class="result-pre">{escape(str(result)[:4000])}</pre>'
+
+
+def render_args(args: dict) -> str:
+    if not args:
+        return ""
+    # For simple one-key dicts with a short value, show inline
+    if len(args) == 1:
+        k, v = next(iter(args.items()))
+        if isinstance(v, str) and len(v) < 100:
+            return f'<span class="arg-inline"><span class="arg-key">{escape(k)}</span>: <span class="arg-val">{escape(v)}</span></span>'
+    return f'<div class="json-block">{json_html(args)}</div>'
+
+
+import re as _re
+
+
+def _md_inline(text: str) -> str:
+    """Apply inline markdown: code, links, bold, italic, strikethrough."""
+    placeholder_map: dict = {}
+    counter = [0]
+
+    def protect(repl: str) -> str:
+        key = f"\x00P{counter[0]}\x00"
+        counter[0] += 1
+        placeholder_map[key] = repl
+        return key
+
+    def save_code(m: "_re.Match") -> str:
+        return protect(f'<code class="md-code">{html.escape(m.group(2))}</code>')
+
+    def save_link(m: "_re.Match") -> str:
+        label = html.escape(m.group(1))
+        url = html.escape(m.group(2))
+        return protect(f'<a href="{url}" target="_blank" rel="noopener">{label}</a>')
+
+    # Protect code spans and links before HTML-escaping
+    text = _re.sub(r"(`+)(.+?)\1", save_code, text, flags=_re.DOTALL)
+    text = _re.sub(r"\[([^\]\n]+)\]\(([^)\n]+)\)", save_link, text)
+
+    # HTML-escape everything else
+    text = html.escape(text)
+
+    # Bold / italic / strikethrough (order: bold before italic)
+    text = _re.sub(r"\*\*\*(.+?)\*\*\*", r"<strong><em>\1</em></strong>", text, flags=_re.DOTALL)
+    text = _re.sub(r"\*\*(.+?)\*\*",     r"<strong>\1</strong>",          text, flags=_re.DOTALL)
+    text = _re.sub(r"__(.+?)__",         r"<strong>\1</strong>",          text, flags=_re.DOTALL)
+    text = _re.sub(r"\*([^*\s][^*\n]*?[^*\s]|\S)\*", r"<em>\1</em>",     text)
+    text = _re.sub(r"_([^_\s][^_\n]*?[^_\s]|\S)_",   r"<em>\1</em>",     text)
+    text = _re.sub(r"~~(.+?)~~",         r"<del>\1</del>",                text, flags=_re.DOTALL)
+
+    # Restore protected spans
+    for key, val in placeholder_map.items():
+        text = text.replace(key, val)
+
+    return text
+
+
+def _md_table(lines: list) -> str:
+    """Render a list of pipe-table lines as an HTML table."""
+    def split_row(line: str) -> list:
+        line = line.strip().strip("|")
+        return [c.strip() for c in line.split("|")]
+
+    rows = [split_row(ln) for ln in lines]
+    if len(rows) < 2:
+        return "<p>" + _md_inline(" ".join(lines)) + "</p>"
+
+    # Detect alignment row (row index 1: cells contain only -, :, space)
+    sep_idx = None
+    for idx, row in enumerate(rows[1:], 1):
+        if all(_re.fullmatch(r":?-+:?", c.strip()) for c in row if c.strip()):
+            sep_idx = idx
+            break
+
+    aligns = []
+    if sep_idx is not None:
+        for cell in rows[sep_idx]:
+            c = cell.strip()
+            if c.startswith(":") and c.endswith(":"):
+                aligns.append('style="text-align:center"')
+            elif c.endswith(":"):
+                aligns.append('style="text-align:right"')
+            else:
+                aligns.append("")
+
+    def cell_attr(i: int) -> str:
+        return f" {aligns[i]}" if i < len(aligns) and aligns[i] else ""
+
+    header_row = rows[0]
+    data_rows = [r for i, r in enumerate(rows) if i != 0 and i != sep_idx]
+
+    thead = "<tr>" + "".join(
+        f'<th{cell_attr(i)}>{_md_inline(c)}</th>'
+        for i, c in enumerate(header_row)
+    ) + "</tr>"
+
+    tbody_rows = []
+    for row in data_rows:
+        cells = "".join(
+            f'<td{cell_attr(i)}>{_md_inline(c)}</td>'
+            for i, c in enumerate(row)
+        )
+        tbody_rows.append(f"<tr>{cells}</tr>")
+
+    return (
+        '<div class="md-table-wrap">'
+        f'<table class="md-table"><thead>{thead}</thead>'
+        f'<tbody>{"".join(tbody_rows)}</tbody></table>'
+        '</div>'
+    )
+
+
+def _is_block_starter(line: str) -> bool:
+    return bool(
+        line.startswith("```")
+        or _re.match(r"^#{1,6}\s", line)
+        or _re.match(r"^[-*_]{3,}\s*$", line)
+        or line.startswith(">")
+        or _re.match(r"^[-*+]\s", line)
+        or _re.match(r"^\d+\.\s", line)
+        or not line.strip()
+    )
+
+
+def _md_list_items(lines: list, ordered: bool) -> str:
+    """Parse flat/indented list lines into <li> elements."""
+    tag = "ol" if ordered else "ul"
+    css = "md-ol" if ordered else "md-ul"
+    item_re = _re.compile(r"^(\d+\.\s+|[-*+]\s+)")
+    items_html = []
+    current: list = []
+    sub: list = []
+
+    def flush_item():
+        if current:
+            body = _md_inline(" ".join(current))
+            if sub:
+                nested = _md_list_items(sub, ordered=bool(_re.match(r"^\d+\.\s", sub[0]) if sub else False))
+                body += nested
+            items_html.append(f"<li class='md-li'>{body}</li>")
+        current.clear()
+        sub.clear()
+
+    for line in lines:
+        m = item_re.match(line)
+        if m:
+            flush_item()
+            current.append(line[m.end():].rstrip())
+        elif line.startswith("  ") or line.startswith("\t"):
+            stripped = line[2:] if line.startswith("  ") else line[1:]
+            if current:
+                sub.append(stripped)
+        else:
+            if current:
+                current.append(line.strip())
+
+    flush_item()
+    return f'<{tag} class="{css}">{"".join(items_html)}</{tag}>'
+
+
+def markdown_to_html(text: str) -> str:
+    """Convert Markdown text to HTML. Handles: headings, bold, italic,
+    inline code, fenced code blocks, ordered/unordered lists, tables,
+    blockquotes, horizontal rules, links, strikethrough."""
+    lines = text.split("\n")
+    out: list = []
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+
+        # ── Fenced code block ──────────────────────────────────────────
+        if _re.match(r"^```", line):
+            lang = line[3:].strip()
+            lang_class = f"lang-{html.escape(lang)}" if lang else "lang-text"
+            i += 1
+            code_lines = []
+            while i < n and not _re.match(r"^```\s*$", lines[i]):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1  # consume closing ```
+            out.append(
+                f'<pre class="code-block {lang_class}">'
+                f'{html.escape(chr(10).join(code_lines))}</pre>'
+            )
+            continue
+
+        # ── Heading ────────────────────────────────────────────────────
+        m = _re.match(r"^(#{1,6})\s+(.*)", line)
+        if m:
+            lvl = len(m.group(1))
+            out.append(f'<h{lvl} class="md-h{lvl}">{_md_inline(m.group(2))}</h{lvl}>')
+            i += 1
+            continue
+
+        # ── Horizontal rule ────────────────────────────────────────────
+        if _re.match(r"^([-*_])\1{2,}\s*$", line):
+            out.append('<hr class="md-hr">')
+            i += 1
+            continue
+
+        # ── Blockquote ─────────────────────────────────────────────────
+        if line.startswith(">"):
+            bq: list = []
+            while i < n and lines[i].startswith(">"):
+                bq.append(lines[i][1:].lstrip())
+                i += 1
+            out.append(f'<blockquote class="md-blockquote">{markdown_to_html(chr(10).join(bq))}</blockquote>')
+            continue
+
+        # ── Unordered list ─────────────────────────────────────────────
+        if _re.match(r"^[-*+]\s", line):
+            lst: list = []
+            while i < n and (_re.match(r"^[-*+]\s", lines[i]) or
+                              (lst and (lines[i].startswith("  ") or lines[i].startswith("\t")))):
+                lst.append(lines[i])
+                i += 1
+            out.append(_md_list_items(lst, ordered=False))
+            continue
+
+        # ── Ordered list ───────────────────────────────────────────────
+        if _re.match(r"^\d+\.\s", line):
+            lst = []
+            while i < n and (_re.match(r"^\d+\.\s", lines[i]) or
+                              (lst and (lines[i].startswith("  ") or lines[i].startswith("\t")))):
+                lst.append(lines[i])
+                i += 1
+            out.append(_md_list_items(lst, ordered=True))
+            continue
+
+        # ── Table (current line has | and next line is separator) ──────
+        if "|" in line and i + 1 < n and _re.match(r"^\|?[\s:|-]+\|?\s*$", lines[i + 1]):
+            tbl: list = []
+            while i < n and "|" in lines[i]:
+                tbl.append(lines[i])
+                i += 1
+            out.append(_md_table(tbl))
+            continue
+
+        # ── Blank line ─────────────────────────────────────────────────
+        if not line.strip():
+            i += 1
+            continue
+
+        # ── Paragraph (collect until blank or block starter) ───────────
+        para: list = []
+        while i < n and lines[i].strip() and not _is_block_starter(lines[i]):
+            para.append(lines[i])
+            i += 1
+        if para:
+            out.append(f'<p class="md-p">{_md_inline(" ".join(para))}</p>')
+        else:
+            i += 1
+
+    return "\n".join(out)
+
+
+def render_overview(ov: dict) -> str:
+    dt_start = parse_ts(ov["start_time"])
+    date_str = dt_start.strftime("%A, %B %-d %Y at %H:%M UTC") if dt_start else "unknown"
+
+    # Model metrics table
+    metrics_html = ""
+    if ov["model_metrics"]:
+        rows = []
+        for model, m in ov["model_metrics"].items():
+            req_count = m.get("requests", {}).get("count", 0)
+            cost = m.get("requests", {}).get("cost", 0)
+            input_tok = m.get("usage", {}).get("inputTokens", 0)
+            output_tok = m.get("usage", {}).get("outputTokens", 0)
+            rows.append(f"""
+            <tr>
+              <td>{escape(model)}</td>
+              <td class="num">{fmt_number(req_count)}</td>
+              <td class="num">{fmt_number(input_tok)}</td>
+              <td class="num">{fmt_number(output_tok)}</td>
+              <td class="num">{fmt_number(cost)}</td>
+            </tr>""")
+        metrics_html = f"""
+        <table class="metrics-table">
+          <thead><tr><th>Model</th><th>Requests</th><th>Input tokens</th><th>Output tokens</th><th>Cost (units)</th></tr></thead>
+          <tbody>{''.join(rows)}</tbody>
+        </table>"""
+
+    # Files modified
+    files_html = ""
+    if ov["files_modified"]:
+        items = "".join(f'<li><code>{escape(f)}</code></li>' for f in ov["files_modified"])
+        files_html = f"""
+        <div class="overview-block">
+          <div class="overview-block-title">📝 Code changes</div>
+          <div class="code-changes">
+            <span class="added">+{fmt_number(ov["lines_added"])} lines</span>
+            <span class="removed">−{fmt_number(ov["lines_removed"])} lines</span>
+            <span class="files">{len(ov["files_modified"])} file(s)</span>
+          </div>
+          <ul class="file-list">{items}</ul>
+        </div>"""
+
+    # Tools used
+    tools_sorted = sorted(ov["tools_used"].items(), key=lambda x: -x[1])
+    tools_html = "".join(
+        f'<span class="tool-badge" style="border-color:{tool_border(n)};background:{tool_bg(n)}">'
+        f'{tool_icon(n)} {escape(n)} <strong>{c}</strong></span>'
+        for n, c in tools_sorted
+    )
+
+    # Intents timeline
+    intents_html = ""
+    if ov["intents"]:
+        items = "".join(f'<li class="intent-item">{escape(i)}</li>' for i in ov["intents"])
+        intents_html = f'<ol class="intent-list">{items}</ol>'
+
+    # User messages summary
+    msgs_html = ""
+    if ov["user_messages"]:
+        items = "".join(
+            f'<li class="user-msg-summary">{escape(m[:200])}{"…" if len(m) > 200 else ""}</li>'
+            for m in ov["user_messages"]
+        )
+        msgs_html = f'<ol class="user-msg-list">{items}</ol>'
+
+    event_count_items = "".join(
+        f'<tr><td>{escape(k)}</td><td class="num">{v}</td></tr>'
+        for k, v in sorted(ov["event_counts"].items())
+    )
+
+    return f"""
+    <section class="overview-section">
+      <h1 class="page-title">🤖 Copilot Session</h1>
+      <div class="overview-meta">
+        <span>📅 {date_str}</span>
+        <span>⏱ Duration: <strong>{fmt_duration(ov["duration_ms"])}</strong></span>
+        {'<span>🔄 Shutdown: <strong>' + escape(ov["shutdown_type"]) + '</strong></span>' if ov["shutdown_type"] else ''}
+        {'<span>🔖 Version: <strong>' + escape(ov["copilot_version"]) + '</strong></span>' if ov["copilot_version"] else ''}
+      </div>
+
+      <div class="overview-grid">
+        <div class="overview-block">
+          <div class="overview-block-title">📍 Context</div>
+          <table class="kv-table">
+            <tr><td>Working directory</td><td><code>{escape(ov["cwd"] or "—")}</code></td></tr>
+            <tr><td>Branch</td><td><code>{escape(ov["branch"] or "—")}</code></td></tr>
+            <tr><td>Commit</td><td><code>{escape((ov["head_commit"] or "—")[:12])}</code></td></tr>
+            <tr><td>Session ID</td><td><code>{escape(ov["session_id"] or "—")}</code></td></tr>
+          </table>
+        </div>
+
+        <div class="overview-block">
+          <div class="overview-block-title">📊 Event summary</div>
+          <table class="kv-table">
+            {event_count_items}
+          </table>
+        </div>
+
+        {files_html}
+
+        {'<div class="overview-block"><div class="overview-block-title">💬 User messages</div>' + msgs_html + '</div>' if msgs_html else ''}
+
+        {'<div class="overview-block"><div class="overview-block-title">🎯 Agent intents</div>' + intents_html + '</div>' if intents_html else ''}
+      </div>
+
+      {'<div class="overview-block metrics-block"><div class="overview-block-title">🧮 Model usage</div>' + metrics_html + '</div>' if metrics_html else ''}
+
+      {'<div class="overview-block tools-block"><div class="overview-block-title">🛠 Tools used</div><div class="tool-badges">' + tools_html + '</div></div>' if tools_html else ''}
+    </section>
+    """
+
+
+def render_turns(turns: list) -> str:
+    parts = []
+    for i, turn in enumerate(turns):
+        um = turn.get("user_message")
+        steps = turn.get("steps", [])
+
+        turn_html = f'<div class="turn" id="turn-{i}">'
+
+        if um:
+            ts_str = fmt_ts(um.get("timestamp", ""))
+            turn_html += f"""
+            <div class="user-bubble">
+              <div class="bubble-header">
+                <span class="bubble-role user-role">👤 User</span>
+                <span class="bubble-ts">{ts_str}</span>
+              </div>
+              <div class="bubble-content md-body">{markdown_to_html(um["content"])}</div>
+            </div>"""
+
+        if steps:
+            steps_html = render_steps(steps, i)
+            turn_html += f"""
+            <div class="assistant-turn">
+              <div class="turn-header">
+                <span class="bubble-role assistant-role">🤖 Assistant</span>
+                <span class="turn-label">Turn {i + 1} — {len(steps)} step(s)</span>
+              </div>
+              {steps_html}
+            </div>"""
+
+        turn_html += "</div>"
+        parts.append(turn_html)
+
+    return "\n".join(parts)
+
+
+def render_steps(steps: list, turn_idx: int) -> str:
+    parts = []
+    for j, step in enumerate(steps):
+        kind = step.get("kind")
+        step_id = f"step-{turn_idx}-{j}"
+
+        if kind == "text":
+            parts.append(f'<div class="text-step md-body">{markdown_to_html(step["content"])}</div>')
+
+        elif kind == "subagent":
+            name = step.get("name", "Sub-agent")
+            ts_s = fmt_ts(step.get("ts_start"))
+            ts_e = fmt_ts(step.get("ts_end"))
+            duration = ""
+            if step.get("ts_start") and step.get("ts_end"):
+                s = parse_ts(step["ts_start"])
+                e = parse_ts(step["ts_end"])
+                if s and e:
+                    duration = fmt_duration(int((e - s).total_seconds() * 1000))
+
+            args = step.get("arguments", {})
+            result = step.get("result")
+
+            parts.append(f"""
+            <details class="tool-step subagent-step" id="{step_id}">
+              <summary class="tool-summary" style="background:#f0f9ff;border-left:3px solid #0ea5e9">
+                <span class="tool-icon">🤖</span>
+                <span class="tool-name">{escape(name)}</span>
+                <span class="tool-meta">{ts_s} → {ts_e} {'(' + duration + ')' if duration else ''}</span>
+              </summary>
+              <div class="tool-body">
+                <div class="tool-section-label">Arguments</div>
+                {render_args(args)}
+                {('<div class="tool-section-label">Result</div>' + render_tool_result(result)) if result else ''}
+              </div>
+            </details>""")
+
+        elif kind == "tool":
+            name = step.get("name", "")
+            summary = step.get("intent_summary") or ""
+            ts_s = fmt_ts(step.get("ts_start"))
+            ts_e = fmt_ts(step.get("ts_end"))
+            success = step.get("success", True)
+            bg = tool_bg(name)
+            border = tool_border(name)
+            icon = tool_icon(name)
+            args = step.get("arguments", {})
+            result = step.get("result")
+
+            status_badge = (
+                '<span class="badge-success">✓</span>' if success
+                else '<span class="badge-fail">✗</span>'
+            )
+            summary_html = f'<span class="tool-intent">{escape(summary)}</span>' if summary else ""
+
+            parts.append(f"""
+            <details class="tool-step" id="{step_id}">
+              <summary class="tool-summary" style="background:{bg};border-left:3px solid {border}">
+                <span class="tool-icon">{icon}</span>
+                <span class="tool-name">{escape(name)}</span>
+                {summary_html}
+                {status_badge}
+                <span class="tool-meta">{ts_s} → {ts_e}</span>
+              </summary>
+              <div class="tool-body">
+                <div class="tool-section-label">Arguments</div>
+                {render_args(args)}
+                {('<div class="tool-section-label">Result</div>' + render_tool_result(result)) if result is not None else ''}
+              </div>
+            </details>""")
+
+    return "\n".join(parts)
+
+
+def render_raw_events(events: list) -> str:
+    rows = []
+    for ev in events:
+        t = ev.get("type", "")
+        ts = fmt_ts(ev.get("timestamp", ""))
+        eid = ev.get("id", "")[:8]
+        rows.append(f"""
+        <details class="raw-event">
+          <summary><span class="raw-ts">{ts}</span> <span class="raw-type">{escape(t)}</span> <span class="raw-id">{eid}…</span></summary>
+          <div class="json-block">{json_html(ev)}</div>
+        </details>""")
+    return "\n".join(rows)
+
+
+CSS = """
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+/* ── Overview ── */
+.overview-section {
+  background: white;
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 28px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.page-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.overview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #64748b;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+.overview-meta strong { color: #1e293b; }
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.overview-block {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.overview-block-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.metrics-block, .tools-block { margin-top: 16px; }
+
+.kv-table { width: 100%; border-collapse: collapse; }
+.kv-table td { padding: 3px 0; vertical-align: top; }
+.kv-table td:first-child { color: #64748b; padding-right: 12px; white-space: nowrap; }
+.kv-table code { font-size: 12px; background: #e2e8f0; padding: 1px 4px; border-radius: 3px; word-break: break-all; }
+
+.code-changes { display: flex; gap: 12px; margin-bottom: 10px; font-weight: 600; font-size: 13px; }
+.added  { color: #16a34a; }
+.removed { color: #dc2626; }
+.files  { color: #2563eb; }
+
+.file-list { list-style: none; }
+.file-list li { font-size: 12px; padding: 2px 0; }
+.file-list code { background: #e2e8f0; padding: 1px 4px; border-radius: 3px; word-break: break-all; }
+
+.user-msg-list, .intent-list { padding-left: 18px; }
+.user-msg-summary { font-size: 13px; padding: 3px 0; color: #334155; }
+.intent-item { font-size: 13px; padding: 2px 0; color: #334155; }
+
+.metrics-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.metrics-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-weight: 600; }
+.metrics-table td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.tool-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.tool-badge {
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Turns ── */
+.turns-section {
+  background: white;
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 28px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.section-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.turn { margin-bottom: 28px; }
+
+.user-bubble {
+  background: #cff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+.bubble-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.bubble-role { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.user-role    { color: #2563eb; }
+.assistant-role { color: #7c3aed; }
+
+.bubble-ts { font-size: 11px; color: #94a3b8; }
+
+.bubble-content {
+  white-space: pre-wrap;
+  color: #1e293b;
+  font-size: 14px;
+}
+
+.assistant-turn {
+  border-left: 3px solid #c4b5fd;
+  padding-left: 16px;
+  margin-left: 4px;
+}
+
+.turn-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.turn-label { font-size: 12px; color: #94a3b8; }
+
+/* ── Tool steps ── */
+.tool-step {
+  margin-bottom: 6px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  flex-wrap: wrap;
+}
+
+.tool-summary::-webkit-details-marker { display: none; }
+.tool-summary::marker { display: none; }
+
+details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
+
+.tool-summary:hover { filter: brightness(.97); }
+
+.tool-icon { font-size: 15px; }
+.tool-name { font-weight: 600; font-size: 13px; }
+.tool-intent { color: #64748b; font-size: 12px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+.tool-meta { margin-left: auto; font-size: 11px; color: #94a3b8; white-space: nowrap; }
+
+.badge-success { color: #16a34a; font-size: 13px; }
+.badge-fail    { color: #dc2626; font-size: 13px; }
+
+.tool-body {
+  padding: 12px 14px;
+  background: white;
+}
+
+.tool-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  margin-top: 12px;
+}
+.tool-section-label:first-child { margin-top: 0; }
+
+.arg-inline { font-size: 13px; }
+.arg-key { color: #7c3aed; font-weight: 600; }
+.arg-val { color: #15803d; }
+
+/* ── Text steps ── */
+.text-step { padding: 4px 0 8px; }
+
+/* ── Markdown body ── */
+.md-body { line-height: 1.7; }
+
+.md-body .md-p {
+  margin: 0 0 10px;
+}
+
+.md-h1, .md-h2, .md-h3, .md-h4, .md-h5, .md-h6 {
+  font-weight: 700;
+  margin: 18px 0 8px;
+  line-height: 1.3;
+  color: #0f172a;
+}
+.md-h1 { font-size: 1.5rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+.md-h2 { font-size: 1.25rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+.md-h3 { font-size: 1.1rem; }
+.md-h4 { font-size: 1rem; }
+.md-h5, .md-h6 { font-size: .9rem; color: #475569; }
+
+.md-ul, .md-ol {
+  margin: 6px 0 10px 22px;
+  padding: 0;
+}
+.md-li { margin: 3px 0; }
+.md-ul .md-ul, .md-ol .md-ol, .md-ul .md-ol, .md-ol .md-ul {
+  margin-top: 3px;
+  margin-bottom: 3px;
+}
+
+.md-blockquote {
+  border-left: 4px solid #cbd5e1;
+  background: #f8fafc;
+  margin: 10px 0;
+  padding: 8px 14px;
+  border-radius: 0 6px 6px 0;
+  color: #475569;
+}
+.md-blockquote p { margin: 0; }
+
+.md-hr {
+  border: none;
+  border-top: 2px solid #e2e8f0;
+  margin: 16px 0;
+}
+
+code.md-code {
+  background: #f1f5f9;
+  color: #be185d;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: .88em;
+  border: 1px solid #e2e8f0;
+}
+
+.md-table-wrap { overflow-x: auto; margin: 10px 0; }
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.md-table th, .md-table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 12px;
+  text-align: left;
+}
+.md-table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  color: #334155;
+}
+.md-table tr:nth-child(even) td { background: #f8fafc; }
+.md-table a { color: #2563eb; }
+
+del { color: #94a3b8; text-decoration: line-through; }
+
+.md-body a { color: #2563eb; text-decoration: underline; }
+.md-body a:hover { color: #1d4ed8; }
+
+.md-body .code-block { margin: 10px 0; }
+
+/* ── Code / JSON blocks ── */
+.json-block, .result-pre, .code-block {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* JSON syntax highlighting */
+.jk    { color: #93c5fd; }   /* key */
+.js    { color: #86efac; }   /* string value */
+.jn    { color: #fca5a5; }   /* number */
+.jb    { color: #fdba74; }   /* bool */
+.jnull { color: #94a3b8; }   /* null */
+.jp    { color: #cbd5e1; }   /* punctuation */
+
+/* ── Raw events ── */
+.raw-section {
+  background: white;
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 28px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.raw-event {
+  border-bottom: 1px solid #f1f5f9;
+  padding: 3px 0;
+}
+.raw-event > summary {
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.raw-event > summary::-webkit-details-marker { display: none; }
+.raw-event > summary:hover { background: #f8fafc; }
+.raw-ts   { color: #94a3b8; font-family: monospace; }
+.raw-type { font-weight: 600; color: #334155; }
+.raw-id   { color: #94a3b8; font-family: monospace; font-size: 11px; }
+.raw-event .json-block { margin: 8px 6px; }
+
+/* ── Nav tabs ── */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: white;
+  padding: 6px;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.tab-btn {
+  flex: 1;
+  padding: 8px 0;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 7px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  transition: all .15s;
+}
+.tab-btn:hover { background: #f1f5f9; }
+.tab-btn.active { background: #1e293b; color: white; }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+"""
+
+JS = """
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="' + name + '"]').classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+"""
+
+
+def render_html(overview: dict, turns: list, events: list, source_path: str) -> str:
+    ov_html = render_overview(overview)
+    turns_html = render_turns(turns)
+    raw_html = render_raw_events(events)
+
+    filename = os.path.basename(source_path)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Copilot Session — {escape(filename)}</title>
+  <style>{CSS}</style>
+</head>
+<body>
+<div class="container">
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="overview"  onclick="showTab('overview')">📊 Overview</button>
+    <button class="tab-btn"        data-tab="turns"     onclick="showTab('turns')">💬 Conversation</button>
+    <button class="tab-btn"        data-tab="raw"       onclick="showTab('raw')">📜 Raw Events</button>
+  </nav>
+
+  <div id="panel-overview" class="tab-panel active">
+    {ov_html}
+  </div>
+
+  <div id="panel-turns" class="tab-panel">
+    <section class="turns-section">
+      <h2 class="section-title">💬 Conversation</h2>
+      {turns_html}
+    </section>
+  </div>
+
+  <div id="panel-raw" class="tab-panel">
+    <section class="raw-section">
+      <h2 class="section-title">📜 Raw Events ({len(events)} total)</h2>
+      {raw_html}
+    </section>
+  </div>
+
+</div>
+<script>{JS}</script>
+</body>
+</html>
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
+
+DEFAULT_GLOB = "~/.copilot/session-state/*/events.jsonl"
+
+
+def load_events(input_path: str) -> list:
+    events = []
+    with open(input_path, encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                print(f"Warning: skipping malformed line {lineno} in {input_path}: {exc}", file=sys.stderr)
+    return events
+
+
+def process_file(input_path: str, output_path: str) -> None:
+    events = load_events(input_path)
+    if not events:
+        print(f"  ⚠ No events found, skipping: {input_path}", file=sys.stderr)
+        return
+    overview = build_overview(events)
+    turns = build_turns(events)
+    html_content = render_html(overview, turns, events, input_path)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(html_content)
+    print(f"  ✓ {output_path}  ({len(events)} events, {len(turns)} turn(s))")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Render Copilot session events.jsonl file(s) as HTML.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "input", nargs="?", default=None,
+        help=f"Path to events.jsonl (default: glob {DEFAULT_GLOB})",
+    )
+    parser.add_argument(
+        "-o", "--output", default=None,
+        help="Output HTML file; only valid when a single input file is given",
+    )
+    parser.add_argument(
+        "-f", "--force", default=False, action="store_true",
+        help="Re-create HTML files that already existed (only in batch mode)",
+    )
+    args = parser.parse_args()
+
+    if args.input:
+        # ── Single file mode ──────────────────────────────────────────
+        input_path = os.path.expanduser(args.input)
+        if not os.path.isfile(input_path):
+            print(f"Error: file not found: {input_path}", file=sys.stderr)
+            sys.exit(1)
+        output_path = os.path.expanduser(args.output) if args.output else \
+            os.path.join(os.path.dirname(input_path), "events.html")
+        process_file(input_path, output_path)
+    else:
+        # ── Batch mode: glob all session events ───────────────────────
+        if args.output:
+            print("Error: --output is not valid in batch mode (no input file given).", file=sys.stderr)
+            sys.exit(1)
+        pattern = os.path.expanduser(DEFAULT_GLOB)
+        paths = sorted(_glob.glob(pattern))
+        if not paths:
+            print(f"No files matched: {DEFAULT_GLOB}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Processing {len(paths)} session file(s)…")
+        ok = skipped = 0
+        for p in paths:
+            out = os.path.join(os.path.dirname(p), "events.html")
+            if os.path.exists(out) and not args.force:
+                skipped += 1
+                continue
+            try:
+                process_file(p, out)
+                ok += 1
+            except Exception as exc:
+                print(f"  ✗ {p}: {exc}", file=sys.stderr)
+                skipped += 1
+        print(f"\nDone: {ok} written, {skipped} skipped.")
+
+
+if __name__ == "__main__":
+    main()
