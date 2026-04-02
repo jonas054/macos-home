@@ -224,6 +224,9 @@
 
 ;; --------------------------------------------------------------------------------
 
+(global-set-key (kbd "C-c e r") #'ediff-revision)
+(global-set-key (kbd "C-c e b") #'ediff-buffers)
+
 (require 'use-package)
 
 (require 'project)
