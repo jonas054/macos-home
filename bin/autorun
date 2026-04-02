@@ -1,3 +1,75 @@
-#!/bin/sh
+#!/usr/bin/env python3
+#
+# Waits for any changes in the given directory (recursively searched), or in
+# the given files, then runs the given command. Then continues to wait, and so
+# on.
+#
+# If command contains a space, it must be inside quotes.
+#
+# Usage: autorun <command> <files...> <dirs...>
 
-python3 $HOME/Dropbox/home/src/autorun2.py "$@"
+import os
+import re
+import subprocess
+import sys
+import time
+import tempfile
+
+WHITE_LIST = r'(\.(java|erl|erh|py|pl|pm|rb|xml|yml|rcw|cfg|cmake|mk|mak|js|ts|kt|sh|cpp|hh|h|c|cc)|^[MR]akefile)$'
+BLACK_LIST = r'/\.|_flymake|\.bundle|#|~|target|workspace.xml'
+SLEEP_TIME = 0.5
+
+
+def main(command, elementsToWatch):
+    cmdFile = tempfile.NamedTemporaryFile()
+    cmdFile.write(command.encode())
+    cmdFile.flush()
+    currentSleepTime = SLEEP_TIME / 0.5
+    startTimes = times(elementsToWatch)
+    count = 0
+    print("Watching: " + "\n          ".join(filesToWatch(elementsToWatch)) +
+          "\n")
+    changed = []
+    while True:
+        count += 1
+        os.environ['CHANGED_FILES'] = " ".join([f[0] for f in changed])
+        subprocess.call(["sh", cmdFile.name])
+        startTimes = times(elementsToWatch)
+        changed = []
+        while not changed:
+            time.sleep(currentSleepTime)
+            if currentSleepTime < SLEEP_TIME * 2:
+                # Gradually increase the sleep time so we don't put
+                # undue stress on the file system when nothing is happening.
+                currentSleepTime *= 1
+            changed = set(times(elementsToWatch)) - set(startTimes)
+        currentSleepTime = SLEEP_TIME
+        print("{}[{}] Changed: {}".format("\n" * 4,
+                                          count,
+                                          ", ".join([f[0] for f in changed])))
+
+
+def times(elementsToWatch):
+    return [os.path.exists(f) and (f, os.path.getmtime(f))
+            for f in filesToWatch(elementsToWatch)]
+
+
+def filesToWatch(elementsToWatch):
+    result = []
+    for e in elementsToWatch:
+        if os.path.isdir(e):
+            for root, dirs, files in os.walk(e):
+                if re.search(BLACK_LIST, root):
+                    continue
+                result.extend([os.path.join(root, f)
+                               for f in files
+                               if (re.search(WHITE_LIST, f) and
+                                   not re.search(BLACK_LIST, f))])
+        elif not re.search('_flymake|#|~', e):
+            result.append(e)
+    return result
+
+try:
+    main(command=sys.argv[1], elementsToWatch=sys.argv[2:] if len(sys.argv) > 2 else '.')
+except KeyboardInterrupt:
+    pass
