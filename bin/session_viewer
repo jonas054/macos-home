@@ -16,6 +16,7 @@ as events.html in its own directory.
 
 import argparse
 import base64
+import difflib
 import glob as _glob
 import html
 import json
@@ -407,6 +408,28 @@ def render_tool_result(result) -> str:
     return f'<pre class="result-pre">{escape(str(result)[:4000])}</pre>'
 
 
+def _render_edit_diff(old: str, new: str) -> str:
+    """Render a unified diff of old_str vs new_str with syntax highlighting."""
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(old_lines, new_lines, fromfile="old_str", tofile="new_str", lineterm=""))
+    if not diff:
+        return '<pre class="arg-pretty-val" style="color:#94a3b8">  (no changes)</pre>'
+    rows = []
+    for line in diff:
+        if line.startswith("+++") or line.startswith("---"):
+            rows.append(f'<span class="diff-meta">{escape(line)}</span>')
+        elif line.startswith("@@"):
+            rows.append(f'<span class="diff-hunk">{escape(line)}</span>')
+        elif line.startswith("+"):
+            rows.append(f'<span class="diff-add">{escape(line)}</span>')
+        elif line.startswith("-"):
+            rows.append(f'<span class="diff-del">{escape(line)}</span>')
+        else:
+            rows.append(escape(line))
+    return f'<pre class="diff-block">{"".join(rows)}</pre>'
+
+
 def _has_multiline_str(args: dict) -> bool:
     """True if any value is a string containing a newline."""
     return any(isinstance(v, str) and "\n" in v for v in args.values())
@@ -426,9 +449,12 @@ def _render_args_pretty(args: dict) -> str:
     return "\n".join(parts)
 
 
-def render_args(args) -> str:
+def render_args(args, tool_name: str = "") -> str:
     if not args:
         return ""
+    if tool_name == "edit" and isinstance(args, dict) and "old_str" in args and "new_str" in args:
+        path_hint = f'<span class="arg-inline"><span class="arg-key">path</span>: <span class="arg-val">{escape(args["path"])}</span></span><br>' if "path" in args else ""
+        return path_hint + _render_edit_diff(args.get("old_str", ""), args.get("new_str", ""))
     if isinstance(args, str):
         if "\n" in args:
             return f'<pre class="arg-pretty-val">{escape(args)}</pre>'
@@ -870,7 +896,7 @@ def render_steps(steps: list, turn_idx: int) -> str:
               </summary>
               <div class="tool-body">
                 <div class="tool-section-label">Arguments</div>
-                {render_args(args)}
+                {render_args(args, name)}
                 {('<div class="tool-section-label">Result</div>' + render_tool_result(result)) if result else ''}
               </div>
             </details>""")
@@ -904,7 +930,7 @@ def render_steps(steps: list, turn_idx: int) -> str:
               </summary>
               <div class="tool-body">
                 <div class="tool-section-label">Arguments</div>
-                {render_args(args)}
+                {render_args(args, name)}
                 {('<div class="tool-section-label">Result</div>' + render_tool_result(result)) if result is not None else ''}
               </div>
             </details>""")
@@ -1165,6 +1191,25 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
   overflow-y: auto;
   margin: 0;
 }
+
+.diff-block {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  max-height: 500px;
+  overflow-y: auto;
+  margin: 0;
+}
+.diff-add  { display: block; background: #14532d; color: #86efac; }
+.diff-del  { display: block; background: #450a0a; color: #fca5a5; }
+.diff-hunk { display: block; color: #93c5fd; }
+.diff-meta { display: block; color: #94a3b8; }
 
 /* ── Text steps ── */
 .text-step { padding: 4px 0 8px; }
