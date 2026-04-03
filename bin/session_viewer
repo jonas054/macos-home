@@ -431,14 +431,7 @@ def render_args(args) -> str:
         return ""
     if isinstance(args, str):
         if "\n" in args:
-            return (
-                f'<div class="arg-box-label">RAW</div>'
-                f'<div class="json-block">{json_html(args)}</div>'
-                f'<details class="arg-pretty-details">'
-                f'<summary class="arg-box-label">PRETTY</summary>'
-                f'<pre class="arg-pretty-val">{escape(args)}</pre>'
-                f'</details>'
-            )
+            return f'<pre class="arg-pretty-val">{escape(args)}</pre>'
         return f'<div class="json-block">{json_html(args)}</div>'
     if not isinstance(args, dict):
         return f'<div class="json-block">{json_html(args)}</div>'
@@ -448,14 +441,7 @@ def render_args(args) -> str:
         if isinstance(v, str) and len(v) < 100 and "\n" not in v:
             return f'<span class="arg-inline"><span class="arg-key">{escape(k)}</span>: <span class="arg-val">{escape(v)}</span></span>'
     if _has_multiline_str(args):
-        return (
-            f'<div class="arg-box-label">RAW</div>'
-            f'<div class="json-block">{json_html(args)}</div>'
-            f'<details class="arg-pretty-details">'
-            f'<summary class="arg-box-label">PRETTY</summary>'
-            f'{_render_args_pretty(args)}'
-            f'</details>'
-        )
+        return _render_args_pretty(args)
     return f'<div class="json-block">{json_html(args)}</div>'
 
 
@@ -1155,29 +1141,6 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
 .arg-inline { font-size: 13px; }
 .arg-key { color: #7c3aed; font-weight: 600; }
 .arg-val { color: #15803d; }
-
-.arg-box-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  color: #64748b;
-  background: #f1f5f9;
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin: 8px 0 4px;
-}
-.arg-box-label:first-child { margin-top: 0; }
-
-.arg-pretty-details { margin-top: 4px; }
-.arg-pretty-details > summary.arg-box-label {
-  cursor: pointer;
-  list-style: none;
-}
-.arg-pretty-details > summary.arg-box-label::-webkit-details-marker { display: none; }
-.arg-pretty-details > summary.arg-box-label::before { content: "▶ "; font-size: 8px; }
-.arg-pretty-details[open] > summary.arg-box-label::before { content: "▼ "; font-size: 8px; }
 
 .arg-pretty-key {
   font-size: 11px;
