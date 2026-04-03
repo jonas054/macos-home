@@ -407,14 +407,55 @@ def render_tool_result(result) -> str:
     return f'<pre class="result-pre">{escape(str(result)[:4000])}</pre>'
 
 
-def render_args(args: dict) -> str:
+def _has_multiline_str(args: dict) -> bool:
+    """True if any value is a string containing a newline."""
+    return any(isinstance(v, str) and "\n" in v for v in args.values())
+
+
+def _render_args_pretty(args: dict) -> str:
+    """Render args with multiline string values shown as readable text blocks."""
+    parts = []
+    for k, v in args.items():
+        key_html = f'<div class="arg-pretty-key">{escape(k)}</div>'
+        if isinstance(v, str) and "\n" in v:
+            parts.append(f'{key_html}<pre class="arg-pretty-val">{escape(v)}</pre>')
+        elif isinstance(v, str):
+            parts.append(f'{key_html}<pre class="arg-pretty-val">{escape(v)}</pre>')
+        else:
+            parts.append(f'{key_html}<div class="json-block">{json_html(v)}</div>')
+    return "\n".join(parts)
+
+
+def render_args(args) -> str:
     if not args:
         return ""
+    if isinstance(args, str):
+        if "\n" in args:
+            return (
+                f'<div class="arg-box-label">RAW</div>'
+                f'<div class="json-block">{json_html(args)}</div>'
+                f'<details class="arg-pretty-details">'
+                f'<summary class="arg-box-label">PRETTY</summary>'
+                f'<pre class="arg-pretty-val">{escape(args)}</pre>'
+                f'</details>'
+            )
+        return f'<div class="json-block">{json_html(args)}</div>'
+    if not isinstance(args, dict):
+        return f'<div class="json-block">{json_html(args)}</div>'
     # For simple one-key dicts with a short value, show inline
     if len(args) == 1:
         k, v = next(iter(args.items()))
-        if isinstance(v, str) and len(v) < 100:
+        if isinstance(v, str) and len(v) < 100 and "\n" not in v:
             return f'<span class="arg-inline"><span class="arg-key">{escape(k)}</span>: <span class="arg-val">{escape(v)}</span></span>'
+    if _has_multiline_str(args):
+        return (
+            f'<div class="arg-box-label">RAW</div>'
+            f'<div class="json-block">{json_html(args)}</div>'
+            f'<details class="arg-pretty-details">'
+            f'<summary class="arg-box-label">PRETTY</summary>'
+            f'{_render_args_pretty(args)}'
+            f'</details>'
+        )
     return f'<div class="json-block">{json_html(args)}</div>'
 
 
@@ -1114,6 +1155,53 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
 .arg-inline { font-size: 13px; }
 .arg-key { color: #7c3aed; font-weight: 600; }
 .arg-val { color: #15803d; }
+
+.arg-box-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: #64748b;
+  background: #f1f5f9;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin: 8px 0 4px;
+}
+.arg-box-label:first-child { margin-top: 0; }
+
+.arg-pretty-details { margin-top: 4px; }
+.arg-pretty-details > summary.arg-box-label {
+  cursor: pointer;
+  list-style: none;
+}
+.arg-pretty-details > summary.arg-box-label::-webkit-details-marker { display: none; }
+.arg-pretty-details > summary.arg-box-label::before { content: "▶ "; font-size: 8px; }
+.arg-pretty-details[open] > summary.arg-box-label::before { content: "▼ "; font-size: 8px; }
+
+.arg-pretty-key {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7c3aed;
+  margin: 6px 0 2px;
+}
+.arg-pretty-key:first-child { margin-top: 0; }
+
+.arg-pretty-val {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 0;
+}
 
 /* ── Text steps ── */
 .text-step { padding: 4px 0 8px; }
