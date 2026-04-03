@@ -495,6 +495,8 @@ def _render_grep_result(content: str, args) -> str:
     return f'<pre class="grep-block">{"".join(r + chr(10) for r in rows)}</pre>'
 
 
+_MARKDOWN_AGENT_NAMES = {"Explore Agent", "General Purpose Agent", "Code Review Agent"}
+
 def render_tool_result(result, tool_name: str = "", args=None) -> str:
     if result is None:
         return "<em>No result</em>"
@@ -503,6 +505,8 @@ def render_tool_result(result, tool_name: str = "", args=None) -> str:
         if content and isinstance(content, str) and len(content) > 0:
             if tool_name == "grep":
                 return _render_grep_result(content, args)
+            if tool_name in _MARKDOWN_AGENT_NAMES:
+                return f'<div class="agent-result md-body">{markdown_to_html(content)}</div>'
             return f'<pre class="result-pre">{escape(content[:4000])}{"..." if len(content) > 4000 else ""}</pre>'
         return f'<div class="json-block">{json_html(result)}</div>'
     return f'<pre class="result-pre">{escape(str(result)[:4000])}</pre>'
@@ -605,7 +609,7 @@ def _md_inline(text: str) -> str:
     text = _re.sub(r"\*\*(.+?)\*\*",     r"<strong>\1</strong>",          text, flags=_re.DOTALL)
     text = _re.sub(r"__(.+?)__",         r"<strong>\1</strong>",          text, flags=_re.DOTALL)
     text = _re.sub(r"\*([^*\s][^*\n]*?[^*\s]|\S)\*", r"<em>\1</em>",     text)
-    text = _re.sub(r"_([^_\s][^_\n]*?[^_\s]|\S)_",   r"<em>\1</em>",     text)
+    text = _re.sub(r"(?<!\w)_([^_\s][^_\n]*?[^_\s]|\S)_(?!\w)",   r"<em>\1</em>",     text)
     text = _re.sub(r"~~(.+?)~~",         r"<del>\1</del>",                text, flags=_re.DOTALL)
 
     # Restore protected spans
@@ -1440,6 +1444,13 @@ del { color: #94a3b8; text-decoration: line-through; }
 .jnull { color: #94a3b8; }   /* null */
 .jp    { color: #cbd5e1; }   /* punctuation */
 
+/* Agent markdown result */
+.agent-result {
+  padding: 4px 2px;
+  border-left: 3px solid #e2e8f0;
+  padding-left: 14px;
+}
+
 /* ── Raw events ── */
 .raw-section {
   background: white;
@@ -1471,6 +1482,15 @@ del { color: #94a3b8; text-decoration: line-through; }
 .raw-event .json-block { margin: 8px 6px; }
 
 /* ── Nav tabs ── */
+.back-link {
+  display: inline-block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #64748b;
+  text-decoration: none;
+}
+.back-link:hover { color: #2563eb; text-decoration: underline; }
+
 .tab-nav {
   display: flex;
   gap: 4px;
@@ -1516,6 +1536,7 @@ def render_html(overview: dict, turns: list, events: list, source_path: str) -> 
     raw_html = render_raw_events(events)
 
     filename = os.path.basename(source_path)
+    overview_link = str(OVERVIEW_OUTPUT)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1528,6 +1549,8 @@ def render_html(overview: dict, turns: list, events: list, source_path: str) -> 
 </head>
 <body>
 <div class="container">
+
+  <a href="file://{escape(overview_link)}" class="back-link">← All sessions</a>
 
   <nav class="tab-nav">
     <button class="tab-btn active" data-tab="overview"  onclick="showTab('overview')">📊 Overview</button>
