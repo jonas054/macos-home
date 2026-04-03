@@ -1520,6 +1520,20 @@ del { color: #94a3b8; text-decoration: line-through; }
 .tab-panel.active { display: block; }
 """
 
+# CSS overrides for red/green colorblindness (deuteranopia/protanopia).
+# Swaps red→orange and green→blue throughout, and adds pattern cues to diffs.
+CSS_A11Y = """
+.badge-success { color: #2563eb; }
+.badge-fail    { color: #ea580c; }
+.diff-add  { background: #1e3a5f; color: #93c5fd; }
+.diff-del  { background: #431407; color: #fed7aa; }
+.diff-add::before { content: "+"; }
+.diff-del::before { content: "−"; }
+.jn    { color: #fbbf24; }
+.js    { color: #93c5fd; }
+.grep-match { background: #312e81; color: #c7d2fe; }
+"""
+
 JS = """
 function showTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1530,13 +1544,14 @@ function showTab(name) {
 """
 
 
-def render_html(overview: dict, turns: list, events: list, source_path: str) -> str:
+def render_html(overview: dict, turns: list, events: list, source_path: str, a11y: bool = False) -> str:
     ov_html = render_overview(overview)
     turns_html = render_turns(turns)
     raw_html = render_raw_events(events)
 
     filename = os.path.basename(source_path)
     overview_link = str(OVERVIEW_OUTPUT)
+    extra_css = CSS_A11Y if a11y else ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1545,7 +1560,7 @@ def render_html(overview: dict, turns: list, events: list, source_path: str) -> 
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Copilot Session — {escape(filename)}</title>
   <link rel="icon" type="image/svg+xml" href="{_FAVICON_URI}">
-  <style>{CSS}</style>
+  <style>{CSS}{extra_css}</style>
 </head>
 <body>
 <div class="container">
@@ -1968,14 +1983,14 @@ def load_events(input_path: str) -> list:
     return events
 
 
-def process_file(input_path: str, output_path: str) -> None:
+def process_file(input_path: str, output_path: str, a11y: bool = False) -> None:
     events = load_events(input_path)
     if not events:
         print(f"  ⚠ No events found, skipping: {input_path}", file=sys.stderr)
         return
     overview = build_overview(events)
     turns = build_turns(events)
-    html_content = render_html(overview, turns, events, input_path)
+    html_content = render_html(overview, turns, events, input_path, a11y=a11y)
     with open(output_path, "w", encoding="utf-8") as fh:
         fh.write(html_content)
     print(f"  ✓ {output_path}  ({len(events)} events, {len(turns)} turn(s))")
@@ -2003,6 +2018,10 @@ def main():
         "--overview", default=False, action="store_true",
         help="Only regenerate sessions-overview.html (skip per-session rendering)",
     )
+    parser.add_argument(
+        "--a11y", default=False, action="store_true",
+        help="Use colorblind-friendly palette (red/green → orange/blue)",
+    )
     args = parser.parse_args()
 
     if args.overview:
@@ -2017,7 +2036,7 @@ def main():
             sys.exit(1)
         output_path = os.path.expanduser(args.output) if args.output else \
             os.path.join(os.path.dirname(input_path), "events.html")
-        process_file(input_path, output_path)
+        process_file(input_path, output_path, a11y=args.a11y)
     else:
         # ── Batch mode: glob all session events ───────────────────────
         if args.output:
@@ -2036,7 +2055,7 @@ def main():
                 skipped += 1
                 continue
             try:
-                process_file(p, out)
+                process_file(p, out, a11y=args.a11y)
                 ok += 1
             except Exception as exc:
                 print(f"  ✗ {p}: {exc}", file=sys.stderr)
