@@ -397,12 +397,91 @@ def tool_border(name: str) -> str:
     return TOOL_BORDER_COLORS.get(name, TOOL_BORDER_COLORS["default"])
 
 
-def render_tool_result(result) -> str:
+def _highlight_grep_match(text: str, pattern: str) -> str:
+    """Highlight regex matches within a grep result line."""
+    import re as _re2
+    if not pattern:
+        return escape(text)
+    try:
+        parts = _re2.split(f"({pattern})", text, flags=_re2.IGNORECASE)
+        out = []
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                out.append(f'<mark class="grep-match">{escape(part)}</mark>')
+            else:
+                out.append(escape(part))
+        return "".join(out)
+    except _re2.error:
+        return escape(text)
+
+
+def _render_grep_result(content: str, args) -> str:
+    """Colorize ripgrep output based on output mode."""
+    if not content or content.strip() in ("No matches found.", ""):
+        return f'<pre class="result-pre">{escape(content)}</pre>'
+
+    mode = (args.get("output_mode", "files_with_matches") if isinstance(args, dict) else "files_with_matches")
+    has_linenum = bool(args.get("-n")) if isinstance(args, dict) else False
+    pattern = (args.get("pattern", "") if isinstance(args, dict) else "")
+
+    rows = []
+    for line in content.splitlines():
+        if not line:
+            rows.append("")
+            continue
+        if mode == "files_with_matches":
+            rows.append(f'<span class="grep-file">{escape(line)}</span>')
+        elif mode == "count":
+            idx = line.rfind(":")
+            if idx > 0:
+                rows.append(
+                    f'<span class="grep-file">{escape(line[:idx])}</span>'
+                    f'<span class="grep-sep">:</span>'
+                    f'<span class="grep-count">{escape(line[idx+1:])}</span>'
+                )
+            else:
+                rows.append(escape(line))
+        else:  # content
+            if has_linenum:
+                # filepath:linenum:text
+                first = line.index(":") if ":" in line else -1
+                second = line.index(":", first + 1) if first >= 0 and ":" in line[first+1:] else -1
+                if second > 0:
+                    fpath = line[:first]
+                    lnum  = line[first+1:second]
+                    text  = line[second+1:]
+                    rows.append(
+                        f'<span class="grep-file">{escape(fpath)}</span>'
+                        f'<span class="grep-sep">:</span>'
+                        f'<span class="grep-lnum">{escape(lnum)}</span>'
+                        f'<span class="grep-sep">:</span>'
+                        f'{_highlight_grep_match(text, pattern)}'
+                    )
+                else:
+                    rows.append(escape(line))
+            else:
+                # filepath:text
+                idx = line.index(":") if ":" in line else -1
+                if idx > 0:
+                    rows.append(
+                        f'<span class="grep-file">{escape(line[:idx])}</span>'
+                        f'<span class="grep-sep">:</span>'
+                        f'{_highlight_grep_match(line[idx+1:], pattern)}'
+                    )
+                else:
+                    rows.append(escape(line))
+
+    return f'<pre class="grep-block">{"".join(r + chr(10) for r in rows)}</pre>'
+
+
+def render_tool_result(result, tool_name: str = "", args=None) -> str:
     if result is None:
         return "<em>No result</em>"
     if isinstance(result, dict):
         content = result.get("content") or result.get("detailedContent")
         if content and isinstance(content, str) and len(content) > 0:
+            if tool_name == "grep":
+                return _render_grep_result(content, args)
             return f'<pre class="result-pre">{escape(content[:4000])}{"..." if len(content) > 4000 else ""}</pre>'
         return f'<div class="json-block">{json_html(result)}</div>'
     return f'<pre class="result-pre">{escape(str(result)[:4000])}</pre>'
@@ -897,7 +976,7 @@ def render_steps(steps: list, turn_idx: int) -> str:
               <div class="tool-body">
                 <div class="tool-section-label">Arguments</div>
                 {render_args(args, name)}
-                {('<div class="tool-section-label">Result</div>' + render_tool_result(result)) if result else ''}
+                {('<div class="tool-section-label">Result</div>' + render_tool_result(result, name, args)) if result is not None else ''}
               </div>
             </details>""")
 
@@ -931,7 +1010,7 @@ def render_steps(steps: list, turn_idx: int) -> str:
               <div class="tool-body">
                 <div class="tool-section-label">Arguments</div>
                 {render_args(args, name)}
-                {('<div class="tool-section-label">Result</div>' + render_tool_result(result)) if result is not None else ''}
+                {('<div class="tool-section-label">Result</div>' + render_tool_result(result, name, args)) if result is not None else ''}
               </div>
             </details>""")
 
@@ -1210,6 +1289,27 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
 .diff-del  { display: block; background: #450a0a; color: #fca5a5; }
 .diff-hunk { display: block; color: #93c5fd; }
 .diff-meta { display: block; color: #94a3b8; }
+
+/* ── Grep result ── */
+.grep-block {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 0;
+}
+.grep-file  { color: #7dd3fc; }
+.grep-sep   { color: #475569; }
+.grep-lnum  { color: #fbbf24; }
+.grep-count { color: #f472b6; font-weight: 600; }
+.grep-match { background: #854d0e; color: #fef08a; border-radius: 2px; font-style: normal; }
 
 /* ── Text steps ── */
 .text-step { padding: 4px 0 8px; }
