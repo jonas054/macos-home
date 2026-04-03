@@ -36,3 +36,5 @@ Pictures/
 Public/
 dev/
 tmp/
+.python_history
+__pycache__
