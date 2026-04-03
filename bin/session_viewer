@@ -385,7 +385,7 @@ def tool_icon(name: str) -> str:
 
 
 def subagent_icon(name: str) -> str:
-    return SUBAGENT_ICON.get(name, "🤖")
+    return SUBAGENT_ICONS.get(name, "🤖")
 
 
 def tool_bg(name: str) -> str:
