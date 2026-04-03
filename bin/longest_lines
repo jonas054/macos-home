@@ -1,12 +1,22 @@
 #!/usr/bin/env ruby
 
 table = Hash.new([])
+limit = ARGV[0] =~ /^-/ ? ARGV.shift.to_i.abs : 80
+
 ARGV.each do |filename|
-  IO.readlines(filename).each_with_index do |line, index|
-    table[line.length] += ["#{filename}:#{index+1}: #{line}"]
+  next unless File.stat(filename).file?
+
+  File.open(filename) do |f|
+    f.readlines.each.with_index do |line, ix|
+      unpacked = begin
+                   line.unpack('U*')
+                 rescue ArgumentError
+                   line.unpack('C*')
+                 end
+      length = unpacked.length
+      table[length] += ["#{filename}:#{ix + 1}: #{line.strip}"] if length > limit
+    end
   end
 end
 
-table.sort.reverse.first(10).each do |index, text|
-  puts text
-end
+table.sort.reverse.each { |_, v| puts v }
