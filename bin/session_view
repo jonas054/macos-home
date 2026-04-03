@@ -1280,22 +1280,6 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
 }
 .arg-pretty-key:first-child { margin-top: 0; }
 
-.arg-pretty-val {
-  background: #0f172a;
-  color: #e2e8f0;
-  border-radius: 6px;
-  padding: 12px 14px;
-  overflow-x: auto;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 400px;
-  overflow-y: auto;
-  margin: 0;
-}
-
 .diff-block {
   background: #0f172a;
   color: #e2e8f0;
@@ -1421,7 +1405,7 @@ del { color: #94a3b8; text-decoration: line-through; }
 .md-body .code-block { margin: 10px 0; }
 
 /* ── Code / JSON blocks ── */
-.json-block, .result-pre, .code-block {
+.json-block, .result-pre, .code-block, .arg-pretty-val {
   background: #0f172a;
   color: #e2e8f0;
   border-radius: 6px;
