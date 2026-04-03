@@ -522,7 +522,7 @@ def _render_edit_diff(old: str, new: str) -> str:
     rows = []
     for line in diff:
         if line.startswith("+++") or line.startswith("---"):
-            rows.append(f'<span class="diff-meta">{escape(line)}</span>')
+            pass # Not useful information - skip the file headers
         elif line.startswith("@@"):
             rows.append(f'<span class="diff-hunk">{escape(line)}</span>')
         elif line.startswith("+"):
