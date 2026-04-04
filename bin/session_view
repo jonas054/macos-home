@@ -4,10 +4,12 @@ session_view - Render Copilot session events.jsonl file(s) as HTML,
                and generate a sessions overview index.
 
 Usage:
-    session_view                          # batch: render all sessions, then regenerate overview
-    session_view <path-to-events.jsonl>   # single file, no overview
-    session_view -o <output.html> <path>  # single file with explicit output path
-    session_view --overview               # only regenerate sessions-overview.html
+    session_view                                   # batch: render all sessions, then regenerate overview
+    session_view <path-to-events.jsonl>            # single file, no overview
+    session_view -o <output.html> <path>           # single file with explicit output path
+    session_view --overview                        # only regenerate sessions-overview.html
+    session_view --story <path>                    # render with a Story tab (calls storyteller agent)
+    session_view --story -f [-l <language>] <path> # force-regenerate the story even if cached
 
 When processing a single file, --output/-o sets the output path (default: events.html
 next to the input file).
@@ -16,6 +18,14 @@ When processing multiple files (no argument), each events.jsonl is rendered in-p
 as events.html in its own directory; existing files are skipped unless events.jsonl
 or session_view itself is newer than events.html.
 After the batch pass, sessions-overview.html is regenerated automatically.
+
+Flags:
+    --story     Generate a Story tab by calling `Copilot CLI`.
+                The story is cached as story.txt next to events.jsonl.
+    --force     Re-generate story even if story.txt exists.
+    --language  Language for the generated story (e.g. "Swedish" or "Frnch").
+    --a11y      Use a colorblind-friendly (deuteranopia/protanopia) colour palette.
+    --overview  Only regenerate sessions-overview.html, skip per-session rendering.
 """
 
 import argparse
@@ -1528,6 +1538,26 @@ del { color: #94a3b8; text-decoration: line-through; }
 
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+
+/* ── Story tab ── */
+.story-section {
+  background: white;
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 28px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.story-body {
+  max-width: 720px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #1e293b;
+}
+
+.story-p {
+  margin: 0 0 1.2em;
+}
 """
 
 # CSS overrides for red/green colorblindness (deuteranopia/protanopia).
@@ -1563,7 +1593,7 @@ function copyCmd(btn, text) {
 """
 
 
-def render_html(overview: dict, turns: list, events: list, source_path: str, a11y: bool = False) -> str:
+def render_html(overview: dict, turns: list, events: list, source_path: str, a11y: bool = False, story_text: str | None = None) -> str:
     ov_html = render_overview(overview)
     turns_html = render_turns(turns)
     raw_html = render_raw_events(events)
@@ -1571,6 +1601,19 @@ def render_html(overview: dict, turns: list, events: list, source_path: str, a11
     filename = os.path.basename(source_path)
     overview_link = str(OVERVIEW_OUTPUT)
     extra_css = CSS_A11Y if a11y else ""
+
+    # Story tab
+    if story_text:
+        paras = "\n".join(
+            f'<p class="story-p">{escape(p.strip())}</p>'
+            for p in story_text.split("\n\n") if p.strip()
+        )
+        story_html = f'<div class="story-body">{paras}</div>'
+        story_tab_btn = '<button class="tab-btn" data-tab="story" onclick="showTab(\'story\')">📖 Story</button>'
+        story_tab_panel = f'<div id="panel-story" class="tab-panel"><section class="story-section"><h2 class="section-title">📖 Story</h2>{story_html}</section></div>'
+    else:
+        story_tab_btn = ""
+        story_tab_panel = ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1590,6 +1633,7 @@ def render_html(overview: dict, turns: list, events: list, source_path: str, a11
     <button class="tab-btn active" data-tab="overview"  onclick="showTab('overview')">📊 Overview</button>
     <button class="tab-btn"        data-tab="turns"     onclick="showTab('turns')">💬 Conversation</button>
     <button class="tab-btn"        data-tab="raw"       onclick="showTab('raw')">📜 Raw Events</button>
+    {story_tab_btn}
   </nav>
 
   <div id="panel-overview" class="tab-panel active">
@@ -1609,6 +1653,8 @@ def render_html(overview: dict, turns: list, events: list, source_path: str, a11
       {raw_html}
     </section>
   </div>
+
+  {story_tab_panel}
 
 </div>
 <script>{JS}</script>
@@ -2048,6 +2094,120 @@ def generate_overview() -> None:
 DEFAULT_GLOB = "~/.copilot/session-state/*/events.jsonl"
 
 
+import subprocess as _subprocess
+
+
+def _story_path(jsonl_path: str) -> str:
+    return os.path.join(os.path.dirname(jsonl_path), "story.txt")
+
+
+def _parsed_json_path(jsonl_path: str) -> str:
+    return os.path.join(os.path.dirname(jsonl_path), "events.txt")
+
+
+def _parse_json_events(jsonl_path: str) -> None:
+    with open(jsonl_path, 'r') as f:
+        events = [json.loads(line) for line in f]
+
+    with open(_parsed_json_path(jsonl_path), 'w', encoding='utf-8') as f:
+        user_name = os.getlogin()
+        heading = f"Session with user '{user_name}' and Copilot\n\n"
+        f.write(heading)
+        for i, event in enumerate(events):
+            event_type = event.get('type', '')
+            data = event.get('data', {})
+            if event_type == 'session.start':
+                context = data.get('context', '')
+                cwd = context.get('cwd', '')
+                repository = context.get('repository', '')
+                f.write(f"Event {i}: SESSION START - Current Working Directory: {cwd}, Repository: {repository}\n")
+            elif event_type == 'user.message':
+                content = data.get('content', '')
+                f.write(f"Event {i}: USER MESSAGE: {content}\n")
+            elif event_type == 'assistant.message':
+                content = data.get('content', '')
+                tool_requests = data.get('toolRequests', [])
+                tools = [tr.get('name') for tr in tool_requests]
+                reasoning_text = data.get('reasoningText', {})
+                f.write(f"Event {i}: ASSISTANT MESSAGE - Tools: {tools}, Reasoning: '{reasoning_text}', Content: {content[:300]}\n")
+            elif event_type == 'assistant.turn_end' or event_type == 'assistant.turn_start':
+                continue
+            elif event_type == 'tool.execution_complete':
+                result = data.get('result', {}).get('detailedContent', '')[:200]
+                f.write(f"Event {i}: TOOL COMPLETE: {result}\n")
+
+
+def read_story(jsonl_path: str) -> str | None:
+    """Return cached story text if story.txt exists next to events.jsonl, else None."""
+    p = _story_path(jsonl_path)
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as fh:
+            return fh.read()
+    return None
+
+
+def generate_story(jsonl_path: str, force: bool = False, language: str = None) -> str | None:
+    """Run the storyteller agent and cache the result as story.txt.
+
+    Returns the story text, or None if generation failed.
+    Skips generation if story.txt already exists and force=False.
+    """
+    cache = _story_path(jsonl_path)
+    if os.path.exists(cache) and not force:
+        with open(cache, encoding="utf-8") as fh:
+            return fh.read()
+
+    # Some available models: gpt-4.1 (0x), gpt-5-mini (0x), gpt-5.4-mini (0.33x),
+    # claude-haiku-4.5 (0x33x), claude-sonnet-4.5 (1x)
+    model = "gpt-5-mini"
+    language = language or "English"
+
+    prompt = (
+        f"Read the Copilot session at {_parsed_json_path(jsonl_path)} and write a text in the "
+        f"{language} language suitable for text-to-speech. Describe the conversation between "
+        "the user and Copilot: what the user asked, what problems were solved, what tools "
+        "Copilot used, and how things progressed step by step. Include details from all the "
+        "events. Do not include code blocks or markdown formatting. Keep technical details "
+        "from the code, which are hard for a text-to-speech function to pronounce, to a "
+        "minimum. Avoid esoteric characters like '→'. Start with the heading "
+        f"'Story generated by {model}' (heading in English). Output the story directly as "
+        "plain text in your response — do not write it to any file and do not use any tools."
+    )
+    _parse_json_events(jsonl_path)  # ensure events.txt is up to date
+    cmd = ["copilot", "--yolo", f"--model={model}", "--prompt", prompt]
+    print(f"  ✦ Generating story…", end=" ", flush=True)
+    try:
+        result = _subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            print(f"failed (exit {result.returncode})")
+            if result.stderr:
+                print(f"    {result.stderr.strip()}", file=sys.stderr)
+            return None
+        lines = result.stdout.strip().split("\n")
+        # Extract the story text starting from the line that begins with "Story generated by"
+        heading_seen = False
+        text = []
+        for line in lines:
+            if line.startswith("Story generated by"):
+                heading_seen = True
+            if heading_seen:
+                text.append(line)
+        text = "\n".join(text).strip()
+        if not text:
+            print("failed (empty output)")
+            return None
+        with open(cache, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        print("done")
+        return text
+    except FileNotFoundError:
+        print("failed (copilot not found)")
+        return None
+    except _subprocess.TimeoutExpired:
+        print("failed (timeout)")
+        return None
+
+
 def load_events(input_path: str) -> list:
     events = []
     with open(input_path, encoding="utf-8") as fh:
@@ -2062,14 +2222,15 @@ def load_events(input_path: str) -> list:
     return events
 
 
-def process_file(input_path: str, output_path: str, a11y: bool = False) -> None:
+def process_file(input_path: str, output_path: str, a11y: bool = False, story: bool = False, force: bool = False, language: str = None) -> None:
     events = load_events(input_path)
     if not events:
         print(f"  ⚠ No events found, skipping: {input_path}", file=sys.stderr)
         return
     overview = build_overview(events)
     turns = build_turns(events)
-    html_content = render_html(overview, turns, events, input_path, a11y=a11y)
+    story_text = generate_story(input_path, force=force, language=language) if story else read_story(input_path)
+    html_content = render_html(overview, turns, events, input_path, a11y=a11y, story_text=story_text)
     with open(output_path, "w", encoding="utf-8") as fh:
         fh.write(html_content)
     print(f"  ✓ {output_path}  ({len(events)} events, {len(turns)} turn(s))")
@@ -2097,6 +2258,18 @@ def main():
         "--a11y", default=False, action="store_true",
         help="Use colorblind-friendly palette (red/green → orange/blue)",
     )
+    parser.add_argument(
+        "--story", default=False, action="store_true",
+        help="Generate a Story tab using the storyteller agent (cached in story.txt; use --force to regenerate)",
+    )
+    parser.add_argument(
+        "--force", default=False, action="store_true",
+        help="Re-generate story even if story.txt exists.",
+    )
+    parser.add_argument(
+        "-l", "--language", default=None,
+        help="Language for the generated story (default is English).",
+    )
     args = parser.parse_args()
 
     if args.overview:
@@ -2111,18 +2284,27 @@ def main():
         if not os.path.isfile(input_path):
             print(f"Error: file not found: {input_path}", file=sys.stderr)
             sys.exit(1)
+        if args.language and not args.story:
+            print("Error: -l/--language is not valid together with --story.", file=sys.stderr)
+            sys.exit(1)
+        if args.force and not args.story:
+            print("Error: -f/--force is not valid together with --story.", file=sys.stderr)
+            sys.exit(1)
         output_path = os.path.expanduser(args.output) if args.output else \
             os.path.join(os.path.dirname(input_path), "events.html")
-        if os.path.exists(output_path):
+        if os.path.exists(output_path) and not args.story:
             out_mtime = os.path.getmtime(output_path)
             if os.path.getmtime(input_path) <= out_mtime and _self_mtime <= out_mtime:
                 print(f"Up to date: {output_path}")
                 return
-        process_file(input_path, output_path, a11y=args.a11y)
+        process_file(input_path, output_path, a11y=args.a11y, story=args.story, force=args.force, language=args.language)
     else:
         # ── Batch mode: glob all session events ───────────────────────
         if args.output:
             print("Error: --output is not valid in batch mode (no input file given).", file=sys.stderr)
+            sys.exit(1)
+        if args.story:
+            print("Error: --story is not valid in batch mode.", file=sys.stderr)
             sys.exit(1)
         pattern = os.path.expanduser(DEFAULT_GLOB)
         paths = sorted(_glob.glob(pattern))
