@@ -890,6 +890,7 @@ def render_overview(ov: dict) -> str:
         for k, v in sorted(ov["event_counts"].items())
     )
 
+    command = 'cd ' + escape(ov["cwd"] or "") + '; copilot --resume ' + escape(ov["session_id"])
     return f"""
     <section class="overview-section">
       <h1 class="page-title">{_COPILOT_IMG} Copilot Session</h1>
@@ -908,6 +909,17 @@ def render_overview(ov: dict) -> str:
             <tr><td>Branch</td><td><code>{escape(ov["branch"] or "—")}</code></td></tr>
             <tr><td>Commit</td><td><code>{escape((ov["head_commit"] or "—")[:12])}</code></td></tr>
             <tr><td>Session ID</td><td><code>{escape(ov["session_id"] or "—")}</code></td></tr>
+            <tr>
+              <td>Resume</td>
+              <td>
+                <span class="resume-cmd">
+                  <code>
+                    {command}
+                  </code>
+                  <button class="copy-btn" onclick="copyCmd(this, '{command}')" title="Copy">⎘</button>
+                </span>
+              </td>
+            </tr>
           </table>
         </div>
 
@@ -1126,6 +1138,21 @@ body {
 .kv-table td { padding: 3px 0; vertical-align: top; }
 .kv-table td:first-child { color: #64748b; padding-right: 12px; white-space: nowrap; }
 .kv-table code { font-size: 12px; background: #e2e8f0; padding: 1px 4px; border-radius: 3px; word-break: break-all; }
+
+.resume-cmd { display: flex; align-items: center; gap: 6px; }
+.copy-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 2em;
+  color: #94a3b8;
+  padding: 0 2px;
+  line-height: 1;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.copy-btn:hover { color: #2563eb; background: #e2e8f0; }
+.copy-btn-ok { color: #16a34a !important; background: #dcfce7 !important; }
 
 .code-changes { display: flex; gap: 12px; margin-bottom: 10px; font-weight: 600; font-size: 13px; }
 .added  { color: #16a34a; }
@@ -1523,6 +1550,15 @@ function showTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelector('[data-tab="' + name + '"]').classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
+}
+
+function copyCmd(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const prev = btn.textContent;
+    btn.textContent = '✓';
+    btn.classList.add('copy-btn-ok');
+    setTimeout(() => { btn.textContent = prev; btn.classList.remove('copy-btn-ok'); }, 1500);
+  });
 }
 """
 
