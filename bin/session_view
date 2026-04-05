@@ -905,7 +905,7 @@ def render_overview(ov: dict) -> str:
       </div>
 
       <div class="overview-grid">
-        <div class="overview-block">
+        <div class="overview-block overview-block-full">
           <div class="overview-block-title">📍 Context</div>
           <table class="kv-table">
             <tr><td>Working directory</td><td><code>{escape(ov["cwd"] or "—")}</code></td></tr>
@@ -926,6 +926,8 @@ def render_overview(ov: dict) -> str:
           </table>
         </div>
 
+        {'<div class="overview-block overview-block-full"><div class="overview-block-title">💬 User messages</div>' + msgs_html + '</div>' if msgs_html else ''}
+
         <div class="overview-block">
           <div class="overview-block-title">📊 Event summary</div>
           <table class="kv-table">
@@ -933,12 +935,10 @@ def render_overview(ov: dict) -> str:
           </table>
         </div>
 
-        {files_html}
-
-        {'<div class="overview-block"><div class="overview-block-title">💬 User messages</div>' + msgs_html + '</div>' if msgs_html else ''}
-
         {'<div class="overview-block"><div class="overview-block-title">🎯 Agent intents</div>' + intents_html + '</div>' if intents_html else ''}
       </div>
+
+      {files_html}
 
       {'<div class="overview-block metrics-block"><div class="overview-block-title">🧮 Model usage</div>' + metrics_html + '</div>' if metrics_html else ''}
 
@@ -1114,7 +1114,7 @@ body {
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -1136,6 +1136,7 @@ body {
 }
 
 .metrics-block, .tools-block { margin-top: 16px; }
+.overview-block-full { grid-column: 1 / -1; }
 
 .kv-table { width: 100%; border-collapse: collapse; }
 .kv-table td { padding: 3px 0; vertical-align: top; }
