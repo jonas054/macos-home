@@ -25,6 +25,7 @@ import glob as _glob
 import html
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -421,11 +422,10 @@ def tool_border(name: str) -> str:
 
 def _highlight_grep_match(text: str, pattern: str) -> str:
     """Highlight regex matches within a grep result line."""
-    import re as _re2
     if not pattern:
         return escape(text)
     try:
-        parts = _re2.split(f"({pattern})", text, flags=_re2.IGNORECASE)
+        parts = re.split(f"({pattern})", text, flags=re.IGNORECASE)
         out = []
         for i, part in enumerate(parts):
             if i % 2 == 1:
@@ -433,7 +433,7 @@ def _highlight_grep_match(text: str, pattern: str) -> str:
             else:
                 out.append(escape(part))
         return "".join(out)
-    except _re2.error:
+    except re.error:
         return escape(text)
 
 
@@ -577,9 +577,6 @@ def render_args(args, tool_name: str = "") -> str:
     return f'<div class="json-block">{json_html(args)}</div>'
 
 
-import re as _re
-
-
 def _md_inline(text: str) -> str:
     """Apply inline markdown: code, links, bold, italic, strikethrough."""
     placeholder_map: dict = {}
@@ -591,28 +588,28 @@ def _md_inline(text: str) -> str:
         placeholder_map[key] = repl
         return key
 
-    def save_code(m: "_re.Match") -> str:
+    def save_code(m: "re.Match") -> str:
         return protect(f'<code class="md-code">{html.escape(m.group(2))}</code>')
 
-    def save_link(m: "_re.Match") -> str:
+    def save_link(m: "re.Match") -> str:
         label = html.escape(m.group(1))
         url = html.escape(m.group(2))
         return protect(f'<a href="{url}" target="_blank" rel="noopener">{label}</a>')
 
     # Protect code spans and links before HTML-escaping
-    text = _re.sub(r"(`+)(.+?)\1", save_code, text, flags=_re.DOTALL)
-    text = _re.sub(r"\[([^\]\n]+)\]\(([^)\n]+)\)", save_link, text)
+    text = re.sub(r"(`+)(.+?)\1", save_code, text, flags=re.DOTALL)
+    text = re.sub(r"\[([^\]\n]+)\]\(([^)\n]+)\)", save_link, text)
 
     # HTML-escape everything else
     text = html.escape(text)
 
     # Bold / italic / strikethrough (order: bold before italic)
-    text = _re.sub(r"\*\*\*(.+?)\*\*\*", r"<strong><em>\1</em></strong>", text, flags=_re.DOTALL)
-    text = _re.sub(r"\*\*(.+?)\*\*",     r"<strong>\1</strong>",          text, flags=_re.DOTALL)
-    text = _re.sub(r"__(.+?)__",         r"<strong>\1</strong>",          text, flags=_re.DOTALL)
-    text = _re.sub(r"\*([^*\s][^*\n]*?[^*\s]|\S)\*", r"<em>\1</em>",     text)
-    text = _re.sub(r"(?<!\w)_([^_\s][^_\n]*?[^_\s]|\S)_(?!\w)",   r"<em>\1</em>",     text)
-    text = _re.sub(r"~~(.+?)~~",         r"<del>\1</del>",                text, flags=_re.DOTALL)
+    text = re.sub(r"\*\*\*(.+?)\*\*\*", r"<strong><em>\1</em></strong>", text, flags=re.DOTALL)
+    text = re.sub(r"\*\*(.+?)\*\*",     r"<strong>\1</strong>",          text, flags=re.DOTALL)
+    text = re.sub(r"__(.+?)__",         r"<strong>\1</strong>",          text, flags=re.DOTALL)
+    text = re.sub(r"\*([^*\s][^*\n]*?[^*\s]|\S)\*", r"<em>\1</em>",     text)
+    text = re.sub(r"(?<!\w)_([^_\s][^_\n]*?[^_\s]|\S)_(?!\w)",   r"<em>\1</em>",     text)
+    text = re.sub(r"~~(.+?)~~",         r"<del>\1</del>",                text, flags=re.DOTALL)
 
     # Restore protected spans
     for key, val in placeholder_map.items():
@@ -634,7 +631,7 @@ def _md_table(lines: list) -> str:
     # Detect alignment row (row index 1: cells contain only -, :, space)
     sep_idx = None
     for idx, row in enumerate(rows[1:], 1):
-        if all(_re.fullmatch(r":?-+:?", c.strip()) for c in row if c.strip()):
+        if all(re.fullmatch(r":?-+:?", c.strip()) for c in row if c.strip()):
             sep_idx = idx
             break
 
@@ -679,11 +676,11 @@ def _md_table(lines: list) -> str:
 def _is_block_starter(line: str) -> bool:
     return bool(
         line.startswith("```")
-        or _re.match(r"^#{1,6}\s", line)
-        or _re.match(r"^[-*_]{3,}\s*$", line)
+        or re.match(r"^#{1,6}\s", line)
+        or re.match(r"^[-*_]{3,}\s*$", line)
         or line.startswith(">")
-        or _re.match(r"^[-*+]\s", line)
-        or _re.match(r"^\d+\.\s", line)
+        or re.match(r"^[-*+]\s", line)
+        or re.match(r"^\d+\.\s", line)
         or not line.strip()
     )
 
@@ -692,7 +689,7 @@ def _md_list_items(lines: list, ordered: bool) -> str:
     """Parse flat/indented list lines into <li> elements."""
     tag = "ol" if ordered else "ul"
     css = "md-ol" if ordered else "md-ul"
-    item_re = _re.compile(r"^(\d+\.\s+|[-*+]\s+)")
+    item_re = re.compile(r"^(\d+\.\s+|[-*+]\s+)")
     items_html = []
     current: list = []
     sub: list = []
@@ -701,7 +698,7 @@ def _md_list_items(lines: list, ordered: bool) -> str:
         if current:
             body = _md_inline(" ".join(current))
             if sub:
-                nested = _md_list_items(sub, ordered=bool(_re.match(r"^\d+\.\s", sub[0]) if sub else False))
+                nested = _md_list_items(sub, ordered=bool(re.match(r"^\d+\.\s", sub[0]) if sub else False))
                 body += nested
             items_html.append(f"<li class='md-li'>{body}</li>")
         current.clear()
@@ -737,12 +734,12 @@ def markdown_to_html(text: str) -> str:
         line = lines[i]
 
         # ── Fenced code block ──────────────────────────────────────────
-        if _re.match(r"^```", line):
+        if re.match(r"^```", line):
             lang = line[3:].strip()
             lang_class = f"lang-{html.escape(lang)}" if lang else "lang-text"
             i += 1
             code_lines = []
-            while i < n and not _re.match(r"^```\s*$", lines[i]):
+            while i < n and not re.match(r"^```\s*$", lines[i]):
                 code_lines.append(lines[i])
                 i += 1
             i += 1  # consume closing ```
@@ -753,7 +750,7 @@ def markdown_to_html(text: str) -> str:
             continue
 
         # ── Heading ────────────────────────────────────────────────────
-        m = _re.match(r"^(#{1,6})\s+(.*)", line)
+        m = re.match(r"^(#{1,6})\s+(.*)", line)
         if m:
             lvl = len(m.group(1))
             out.append(f'<h{lvl} class="md-h{lvl}">{_md_inline(m.group(2))}</h{lvl}>')
@@ -761,7 +758,7 @@ def markdown_to_html(text: str) -> str:
             continue
 
         # ── Horizontal rule ────────────────────────────────────────────
-        if _re.match(r"^([-*_])\1{2,}\s*$", line):
+        if re.match(r"^([-*_])\1{2,}\s*$", line):
             out.append('<hr class="md-hr">')
             i += 1
             continue
@@ -776,9 +773,9 @@ def markdown_to_html(text: str) -> str:
             continue
 
         # ── Unordered list ─────────────────────────────────────────────
-        if _re.match(r"^[-*+]\s", line):
+        if re.match(r"^[-*+]\s", line):
             lst: list = []
-            while i < n and (_re.match(r"^[-*+]\s", lines[i]) or
+            while i < n and (re.match(r"^[-*+]\s", lines[i]) or
                               (lst and (lines[i].startswith("  ") or lines[i].startswith("\t")))):
                 lst.append(lines[i])
                 i += 1
@@ -786,9 +783,9 @@ def markdown_to_html(text: str) -> str:
             continue
 
         # ── Ordered list ───────────────────────────────────────────────
-        if _re.match(r"^\d+\.\s", line):
+        if re.match(r"^\d+\.\s", line):
             lst = []
-            while i < n and (_re.match(r"^\d+\.\s", lines[i]) or
+            while i < n and (re.match(r"^\d+\.\s", lines[i]) or
                               (lst and (lines[i].startswith("  ") or lines[i].startswith("\t")))):
                 lst.append(lines[i])
                 i += 1
@@ -796,7 +793,7 @@ def markdown_to_html(text: str) -> str:
             continue
 
         # ── Table (current line has | and next line is separator) ──────
-        if "|" in line and i + 1 < n and _re.match(r"^\|?[\s:|-]+\|?\s*$", lines[i + 1]):
+        if "|" in line and i + 1 < n and re.match(r"^\|?[\s:|-]+\|?\s*$", lines[i + 1]):
             tbl: list = []
             while i < n and "|" in lines[i]:
                 tbl.append(lines[i])
