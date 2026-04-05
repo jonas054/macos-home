@@ -557,6 +557,8 @@ def _render_args_pretty(args: dict) -> str:
 def render_args(args, tool_name: str = "") -> str:
     if not args:
         return ""
+    if tool_name == "bash" and isinstance(args, dict) and "command" in args and "description" in args:
+        return f'<div class="code-block">{args["command"]}</div>'
     if tool_name == "edit" and isinstance(args, dict) and "old_str" in args and "new_str" in args:
         path_hint = f'<span class="arg-inline"><span class="arg-key">path</span>: <span class="arg-val">{escape(args["path"])}</span></span><br>' if "path" in args else ""
         return path_hint + _render_edit_diff(args.get("old_str", ""), args.get("new_str", ""))
