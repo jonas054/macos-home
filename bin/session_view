@@ -13,7 +13,8 @@ When processing a single file, --output/-o sets the output path (default: events
 next to the input file).
 
 When processing multiple files (no argument), each events.jsonl is rendered in-place
-as events.html in its own directory; existing files are skipped unless -f/--force.
+as events.html in its own directory; existing files are skipped unless events.jsonl
+or session_view itself is newer than events.html.
 After the batch pass, sessions-overview.html is regenerated automatically.
 """
 
@@ -2030,10 +2031,6 @@ def main():
         help="Output HTML file; only valid when a single input file is given",
     )
     parser.add_argument(
-        "-f", "--force", default=False, action="store_true",
-        help="Re-create HTML files that already existed (only in batch mode)",
-    )
-    parser.add_argument(
         "--overview", default=False, action="store_true",
         help="Only regenerate sessions-overview.html (skip per-session rendering)",
     )
@@ -2047,6 +2044,8 @@ def main():
         generate_overview()
         return
 
+    _self_mtime = os.path.getmtime(__file__)
+
     if args.input:
         # ── Single file mode ──────────────────────────────────────────
         input_path = os.path.expanduser(args.input)
@@ -2055,6 +2054,11 @@ def main():
             sys.exit(1)
         output_path = os.path.expanduser(args.output) if args.output else \
             os.path.join(os.path.dirname(input_path), "events.html")
+        if os.path.exists(output_path):
+            out_mtime = os.path.getmtime(output_path)
+            if os.path.getmtime(input_path) <= out_mtime and _self_mtime <= out_mtime:
+                print(f"Up to date: {output_path}")
+                return
         process_file(input_path, output_path, a11y=args.a11y)
     else:
         # ── Batch mode: glob all session events ───────────────────────
@@ -2067,20 +2071,24 @@ def main():
             print(f"No files matched: {DEFAULT_GLOB}", file=sys.stderr)
             sys.exit(1)
         print(f"Processing {len(paths)} session file(s)…")
-        ok = skipped = 0
+        ok = skipped = generated = 0
         for p in paths:
             out = os.path.join(os.path.dirname(p), "events.html")
-            if os.path.exists(out) and not args.force:
-                skipped += 1
-                continue
+            if os.path.exists(out):
+                out_mtime = os.path.getmtime(out)
+                if os.path.getmtime(p) <= out_mtime and _self_mtime <= out_mtime:
+                    skipped += 1
+                    continue
             try:
                 process_file(p, out, a11y=args.a11y)
                 ok += 1
+                generated += 1
             except Exception as exc:
                 print(f"  ✗ {p}: {exc}", file=sys.stderr)
                 skipped += 1
         print(f"\nDone: {ok} written, {skipped} skipped.")
-        generate_overview()
+        if generated:
+            generate_overview()
 
 
 if __name__ == "__main__":
