@@ -4,10 +4,10 @@ session_view - Render Copilot session events.jsonl file(s) as HTML,
                and generate a sessions overview index.
 
 Usage:
-    session_view                                   # batch: render all sessions, then regenerate overview
-    session_view <path-to-events.jsonl>            # single file, no overview
-    session_view --story <path>                    # render with a Story tab (calls storyteller agent)
-    session_view --story -f [-l <language>] <path> # force-regenerate the story even if cached
+    session_view                                      # batch: render all sessions, then regenerate overview
+    session_view <session-id or path-to-events.jsonl> # single file, no overview
+    session_view --story <path>                       # render with a Story tab (calls storyteller agent)
+    session_view --story -f [-l <language>] <path>    # force-regenerate the story even if cached
 
 When processing multiple files (no argument), each events.jsonl is rendered in-place
 as events.html in its own directory; existing files are skipped unless events.jsonl
@@ -364,8 +364,8 @@ TOOL_ICONS = {
     "web_search": "🌐",
     "web_fetch": "🌐",
     "report_intent": "🎯",
-    "read_bash": "📤",
-    "write_bash": "📥",
+    "read_bash": "🖥️👀",
+    "write_bash": "🖥️✏️",
     "stop_bash": "🛑",
     "list_bash": "📋",
     "read_agent": "📡",
@@ -2279,6 +2279,13 @@ def main():
     if args.input:
         # ── Single file mode ──────────────────────────────────────────
         input_path = os.path.expanduser(args.input)
+        # Accept a bare session ID: resolve to the canonical events.jsonl path
+        if not os.path.exists(input_path):
+            candidate = os.path.expanduser(
+                f"~/.copilot/session-state/{args.input}/events.jsonl"
+            )
+            if os.path.isfile(candidate):
+                input_path = candidate
         if not os.path.isfile(input_path):
             print(f"Error: file not found: {input_path}", file=sys.stderr)
             sys.exit(1)
