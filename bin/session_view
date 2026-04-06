@@ -1961,6 +1961,9 @@ def build_overview_html(sessions: list) -> str:
     home = str(Path.home())
     data = []
     for s in sessions:
+        if s["first_prompt"].startswith("Read the Copilot session"):
+            continue # Internal session for story generation, not user-initiated
+
         cwd = s["cwd"]
         cwd_display = "/".join(cwd.replace(home, "~").split("/")[-2:]) if cwd else ""
         data.append({
