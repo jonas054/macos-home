@@ -829,20 +829,20 @@ def render_overview(ov: dict) -> str:
         rows = []
         for model, m in ov["model_metrics"].items():
             req_count = m.get("requests", {}).get("count", 0)
-            cost = m.get("requests", {}).get("cost", 0)
+            premium = m.get("requests", {}).get("cost", 0)
             input_tok = m.get("usage", {}).get("inputTokens", 0)
             output_tok = m.get("usage", {}).get("outputTokens", 0)
             rows.append(f"""
             <tr>
               <td>{escape(model)}</td>
               <td class="num">{fmt_number(req_count)}</td>
+              <td class="num metrics-premium">{fmt_number(premium)}</td>
               <td class="num">{fmt_number(input_tok)}</td>
               <td class="num">{fmt_number(output_tok)}</td>
-              <td class="num">{fmt_number(cost)}</td>
             </tr>""")
         metrics_html = f"""
         <table class="metrics-table">
-          <thead><tr><th>Model</th><th>Requests</th><th>Input tokens</th><th>Output tokens</th><th>Cost (units)</th></tr></thead>
+          <thead><tr><th style="text-align: left">Model</th><th>Requests</th><th>Premium</th><th>Input tokens</th><th>Output tokens</th></tr></thead>
           <tbody>{''.join(rows)}</tbody>
         </table>"""
 
@@ -1168,9 +1168,10 @@ body {
 .intent-item { font-size: 13px; padding: 2px 0; color: #334155; }
 
 .metrics-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.metrics-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-weight: 600; }
+.metrics-table th { text-align: right; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-weight: 600; }
 .metrics-table td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
+.metrics-premium { color: #7c3aed; font-weight: 600; }
 
 .tool-badges { display: flex; flex-wrap: wrap; gap: 8px; }
 .tool-badge {
@@ -1700,6 +1701,14 @@ body {
 .group-header:hover td { background: #e2e8f0; }
 .group-toggle { display: inline-block; width: 14px; font-size: 10px; color: #64748b; }
 .group-count { color: #94a3b8; font-weight: normal; margin-left: 6px; font-size: 11px; }
+.mu-section { margin-top: 0; }
+.mu-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; color: #1e293b; }
+.mu-table { border-collapse: collapse; font-size: 13px; }
+.mu-table th { text-align: left; padding: 6px 16px 6px 0; border-bottom: 2px solid #e2e8f0; color: #475569; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; font-size: 11px; white-space: nowrap; }
+.mu-table td { padding: 6px 16px 6px 0; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+.mu-table .num { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums; }
+.mu-premium { color: #7c3aed; font-weight: 600; }
+.mu-total td { border-top: 2px solid #e2e8f0; border-bottom: none; font-weight: 600; }
 """
 
 OVERVIEW_JS = """
@@ -1855,6 +1864,8 @@ def read_session(session_dir: Path) -> dict:
         "cwd": "",
         "first_prompt": "",
         "model": "",
+        "total_premium_requests": 0,
+        "model_metrics": {},
     }
 
     jsonl_path = session_dir / "events.jsonl"
@@ -1888,9 +1899,10 @@ def read_session(session_dir: Path) -> dict:
                 elif not info["model"] and "model" in data:
                     info["model"] = data["model"]
 
-                # stop once we have everything
-                if info["start_time"] and info["first_prompt"] and info["model"]:
-                    break
+                elif etype == "session.shutdown":
+                    info["total_premium_requests"] = data.get("totalPremiumRequests", 0)
+                    info["model_metrics"] = data.get("modelMetrics", {})
+
     except OSError:
         pass
 
@@ -1912,6 +1924,54 @@ def build_overview_html(sessions: list) -> str:
             "prompt": s["first_prompt"],
             "link": str(s["events_html"]),
         })
+
+    # Aggregate model metrics across all sessions
+    agg: dict = {}  # model -> {requests, premium, input_tokens, output_tokens}
+    for s in sessions:
+        for model, m in s.get("model_metrics", {}).items():
+            a = agg.setdefault(model, {"requests": 0, "premium": 0, "input_tokens": 0, "output_tokens": 0})
+            a["requests"]     += m.get("requests", {}).get("count", 0)
+            a["premium"]      += m.get("requests", {}).get("cost", 0)
+            a["input_tokens"] += m.get("usage", {}).get("inputTokens", 0)
+            a["output_tokens"]+= m.get("usage", {}).get("outputTokens", 0)
+
+    model_usage_html = ""
+    if agg:
+        rows = "".join(
+            f"<tr>"
+            f"<td>{escape(model)}</td>"
+            f'<td class="num">{fmt_number(a["requests"])}</td>'
+            f'<td class="num mu-premium">{fmt_number(a["premium"])}</td>'
+            f'<td class="num">{fmt_number(a["input_tokens"])}</td>'
+            f'<td class="num">{fmt_number(a["output_tokens"])}</td>'
+            f"</tr>"
+            for model, a in sorted(agg.items())
+        )
+        totals = {k: sum(a[k] for a in agg.values()) for k in ("requests", "premium", "input_tokens", "output_tokens")}
+        if len(agg) > 1:
+            rows += (
+                f'<tr class="mu-total">'
+                f"<td>Total</td>"
+                f'<td class="num">{fmt_number(totals["requests"])}</td>'
+                f'<td class="num mu-premium">{fmt_number(totals["premium"])}</td>'
+                f'<td class="num">{fmt_number(totals["input_tokens"])}</td>'
+                f'<td class="num">{fmt_number(totals["output_tokens"])}</td>'
+                f"</tr>"
+            )
+        model_usage_html = f"""
+    <div class="overview-section mu-section">
+      <h2 class="mu-title">🧮 Model usage</h2>
+      <table class="mu-table">
+        <thead><tr>
+          <th>Model</th>
+          <th>Requests</th>
+          <th>Premium</th>
+          <th>Input tokens</th>
+          <th>Output tokens</th>
+        </tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>"""
 
     data_json = json.dumps(data, ensure_ascii=False)
     js = OVERVIEW_JS.replace("__DATA__", data_json)
@@ -1949,6 +2009,7 @@ def build_overview_html(sessions: list) -> str:
         <tbody></tbody>
       </table>
     </div>
+    {model_usage_html}
   </div>
   <script>{js}</script>
 </body>
