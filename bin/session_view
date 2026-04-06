@@ -932,13 +932,13 @@ def render_overview(ov: dict) -> str:
         </div>
 
         {'<div class="overview-block"><div class="overview-block-title">🎯 Agent intents</div>' + intents_html + '</div>' if intents_html else ''}
+
+        {files_html}
+
+        {'<div class="overview-block"><div class="overview-block-title">🧮 Model usage</div>' + metrics_html + '</div>' if metrics_html else ''}
+
+        {'<div class="overview-block"><div class="overview-block-title">🛠 Tools used</div><div class="tool-badges">' + tools_html + '</div></div>' if tools_html else ''}
       </div>
-
-      {files_html}
-
-      {'<div class="overview-block metrics-block"><div class="overview-block-title">🧮 Model usage</div>' + metrics_html + '</div>' if metrics_html else ''}
-
-      {'<div class="overview-block tools-block"><div class="overview-block-title">🛠 Tools used</div><div class="tool-badges">' + tools_html + '</div></div>' if tools_html else ''}
     </section>
     """
 
@@ -1131,7 +1131,6 @@ body {
   letter-spacing: .4px;
 }
 
-.metrics-block, .tools-block { margin-top: 16px; }
 .overview-block-full { grid-column: 1 / -1; }
 
 .kv-table { width: 100%; border-collapse: collapse; }
@@ -1273,7 +1272,7 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
 
 .tool-icon { font-size: 15px; }
 .tool-name { font-weight: 600; font-size: 13px; }
-.tool-intent { color: #64748b; font-size: 12px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+.tool-intent { color: #64748b; font-size: 12px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-meta { margin-left: auto; font-size: 11px; color: #94a3b8; white-space: nowrap; }
 
 .badge-success { color: #16a34a; font-size: 13px; }
