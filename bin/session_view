@@ -6,13 +6,8 @@ session_view - Render Copilot session events.jsonl file(s) as HTML,
 Usage:
     session_view                                   # batch: render all sessions, then regenerate overview
     session_view <path-to-events.jsonl>            # single file, no overview
-    session_view -o <output.html> <path>           # single file with explicit output path
-    session_view --overview                        # only regenerate sessions-overview.html
     session_view --story <path>                    # render with a Story tab (calls storyteller agent)
     session_view --story -f [-l <language>] <path> # force-regenerate the story even if cached
-
-When processing a single file, --output/-o sets the output path (default: events.html
-next to the input file).
 
 When processing multiple files (no argument), each events.jsonl is rendered in-place
 as events.html in its own directory; existing files are skipped unless events.jsonl
@@ -25,7 +20,6 @@ Flags:
     --force     Re-generate story even if story.txt exists.
     --language  Language for the generated story (e.g. "Swedish" or "Frnch").
     --a11y      Use a colorblind-friendly (deuteranopia/protanopia) colour palette.
-    --overview  Only regenerate sessions-overview.html, skip per-session rendering.
 """
 
 import argparse
@@ -2247,14 +2241,6 @@ def main():
         help=f"Path to events.jsonl (default: glob {DEFAULT_GLOB})",
     )
     parser.add_argument(
-        "-o", "--output", default=None,
-        help="Output HTML file; only valid when a single input file is given",
-    )
-    parser.add_argument(
-        "--overview", default=False, action="store_true",
-        help="Only regenerate sessions-overview.html (skip per-session rendering)",
-    )
-    parser.add_argument(
         "--a11y", default=False, action="store_true",
         help="Use colorblind-friendly palette (red/green → orange/blue)",
     )
@@ -2272,10 +2258,6 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.overview:
-        generate_overview()
-        return
-
     _self_mtime = os.path.getmtime(__file__)
 
     if args.input:
@@ -2290,8 +2272,7 @@ def main():
         if args.force and not args.story:
             print("Error: -f/--force is not valid together with --story.", file=sys.stderr)
             sys.exit(1)
-        output_path = os.path.expanduser(args.output) if args.output else \
-            os.path.join(os.path.dirname(input_path), "events.html")
+        output_path = os.path.join(os.path.dirname(input_path), "events.html")
         if os.path.exists(output_path) and not args.story:
             out_mtime = os.path.getmtime(output_path)
             if os.path.getmtime(input_path) <= out_mtime and _self_mtime <= out_mtime:
@@ -2300,9 +2281,6 @@ def main():
         process_file(input_path, output_path, a11y=args.a11y, story=args.story, force=args.force, language=args.language)
     else:
         # ── Batch mode: glob all session events ───────────────────────
-        if args.output:
-            print("Error: --output is not valid in batch mode (no input file given).", file=sys.stderr)
-            sys.exit(1)
         if args.story:
             print("Error: --story is not valid in batch mode.", file=sys.stderr)
             sys.exit(1)
