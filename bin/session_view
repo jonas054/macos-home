@@ -1569,12 +1569,21 @@ CSS_A11Y = """
 """
 
 JS = """
-function showTab(name) {
+function showTab(name, pushState) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelector('[data-tab="' + name + '"]').classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
+  if (pushState !== false) location.hash = name;
 }
+
+function applyHash() {
+  const name = location.hash.slice(1);
+  if (name && document.querySelector('[data-tab="' + name + '"]')) showTab(name, false);
+}
+
+window.addEventListener('hashchange', applyHash);
+applyHash();
 
 function copyCmd(btn, text) {
   navigator.clipboard.writeText(text).then(() => {
