@@ -1,11 +1,11 @@
 #!/usr/bin/env ruby
 #
-# Calculates the percentage of the month that is elapsed or left,
+# Calculates the percentage of the month that is elapsed or remaining,
 # based on calendar days and workdays.
 #
 # Usage:
-#   percent_left_of_month [--remaining|-r]
-#   percent_left_of_month --test             (Run unit tests)
+#   percent_remaining_of_month [--remaining|-r]
+#   percent_remaining_of_month --test             (Run unit tests)
 
 require 'date'
 
@@ -35,49 +35,58 @@ def percent_left_of_month(now = Time.now, only_workdays)
 end
 
 def workday?(date)
-  return false if date.saturday? || date.sunday? # Weekends
+  !(date.saturday? || date.sunday? || holiday?(date))
+end
 
+def holiday?(date)
   easter_sunday = easter_sunday(date.year)
-  is_holiday = (is?(date, 1, 1) ||                     # New Year's Day
-                is?(date, 1, 6) ||                     # Epiphany
-                date == easter_sunday - 2 ||           # Good Friday
-                date == easter_sunday + 1 ||           # Easter Monday
-                is?(date, 5, 1) ||                     # May Day
-                date == easter_sunday + 39 ||          # Ascension Day
-                date == easter_sunday + 49 ||          # Pentecost
-                is?(date, 6, 6) ||                     # National Day
-                (24..26).any? { is?(date, 12, _1) } || # Christmas
-                is?(date, 12, 31))                     # New Year's Eve
-  !is_holiday
+  is?(date, 1, 1) ||                       # New Year's Day
+    is?(date, 1, 6) ||                     # Epiphany
+    date == easter_sunday - 2 ||           # Good Friday
+    date == easter_sunday + 1 ||           # Easter Monday
+    is?(date, 5, 1) ||                     # May Day
+    date == easter_sunday + 39 ||          # Ascension Day
+    is?(date, 6, 6) ||                     # National Day
+    (24..26).any? { is?(date, 12, _1) } || # Christmas
+    is?(date, 12, 31)                      # New Year's Eve
 end
 
 def easter_sunday(year)
-  a = year % 19
-  b = year / 100
-  c = year % 100
-  h = (19 * a + b - (b / 4) - ((b - (b + 8) / 25 + 1) / 3) + 15) % 30
-  l = (32 + 2 * (b % 4) + 2 * (c / 4) - h - c % 4) % 7
-  m = (a + 11 * h + 22 * l) / 451
+  aa = year % 19
+  century = year / 100
+  year_two_digits = year % 100
+  hh = (19 * aa +
+        century -
+        (century / 4) -
+        ((century - (century + 8) / 25 + 1) / 3) +
+        15) % 30
+  ll = (32 +
+        2 * (century % 4) +
+        2 * (year_two_digits / 4) -
+        hh -
+        year_two_digits % 4) % 7
+  mm = (aa + 11 * hh + 22 * ll) / 451
+  xx = hh + ll - 7 * mm + 114
 
-  Date.new(year, (h + l - 7 * m + 114) / 31, ((h + l - 7 * m + 114) % 31) + 1)
+  Date.new(year, xx / 31, (xx % 31) + 1)
 end
 
 def is?(date, month, day)
   date == Date.new(date.year, month, day)
 end
 
-def report(only_workdays, show_remaining_time)
-  which_days = only_workdays ? 'workdays' : 'calendar days'
-  legend = show_remaining_time ? "left of the month (#{which_days})" : "elapsed of the month (#{which_days})"
-  percent_left = percent_left_of_month(only_workdays)
+def report(only_workdays, show_remaining_time, now = Time.now)
+  percent_left = percent_left_of_month(now, only_workdays)
   percent = show_remaining_time ? percent_left : (100.0 - percent_left).round(1)
-  puts "#{percent}% #{legend}"
+  direction = show_remaining_time ? 'remaining' : 'elapsed'
+  which_days = only_workdays ? 'workdays' : 'calendar days'
+  "#{percent}% #{direction} of the month (#{which_days})"
 end
 
 puts Time.now.strftime('%Y-%m-%d (%A) %H:%M:%S')
 show_remaining_time = %w[-r --remaining].any? { ARGV.include?(_1) }
-report(false, show_remaining_time)
-report(true, show_remaining_time)
+puts report(false, show_remaining_time)
+puts report(true, show_remaining_time)
 
 # Run tests if --test flag is given
 # ----------------------------------------------------------------------
@@ -98,6 +107,71 @@ if ARGV.include?('--test')
       assert_equal(77.7, percent_left_of_month(Time.new(2026, 4, 7, 14, 15, 0), false))
       assert_equal(3.3, percent_left_of_month(Time.new(2026, 4, 29, 17, 0, 0), false))
       assert_equal(0.0, percent_left_of_month(Time.new(2026, 4, 30, 17, 0, 0), false))
+    end
+
+    def test_easter_sunday
+      assert_equal(Date.new(2026, 4, 5), easter_sunday(2026))
+      assert_equal(Date.new(2027, 3, 28), easter_sunday(2027))
+      assert_equal(Date.new(2028, 4, 16), easter_sunday(2028))
+      assert_equal(Date.new(2029, 4, 1), easter_sunday(2029))
+      assert_equal(Date.new(2030, 4, 21), easter_sunday(2030))
+      assert_equal(Date.new(2031, 4, 13), easter_sunday(2031))
+    end
+
+    def test_workday
+      assert(workday?(Date.new(2026, 4, 1))) # Wednesday
+      assert(workday?(Date.new(2026, 4, 2))) # Thursday
+      assert(!workday?(Date.new(2026, 4, 3))) # Good Friday
+      assert(!workday?(Date.new(2026, 4, 4))) # Easter Saturday
+      assert(!workday?(Date.new(2026, 4, 5))) # Easter Sunday
+      assert(!workday?(Date.new(2026, 4, 6))) # Easter Monday
+      assert(workday?(Date.new(2026, 4, 7))) # Tuesday
+      assert(!workday?(Date.new(2026, 5, 14))) # Ascension Day
+      assert(workday?(Date.new(2026, 5, 15))) # Squeeze day
+    end
+
+    def test_report_calendar_days_remaining
+      assert_equal("100.0% remaining of the month (calendar days)",
+                   report(false, true, Time.new(2026, 4, 1, 8, 0, 0)))
+      assert_equal("77.7% remaining of the month (calendar days)",
+                   report(false, true, Time.new(2026, 4, 7, 14, 15, 0)))
+      assert_equal("3.3% remaining of the month (calendar days)",
+                   report(false, true, Time.new(2026, 4, 29, 17, 0, 0)))
+      assert_equal("0.0% remaining of the month (calendar days)",
+                   report(false, true, Time.new(2026, 4, 30, 17, 0, 0)))
+    end
+
+    def test_report_workdays_remaining
+      assert_equal("100.0% remaining of the month (workdays)",
+                   report(true, true, Time.new(2026, 4, 1, 8, 0, 0)))
+      assert_equal("86.5% remaining of the month (workdays)",
+                   report(true, true, Time.new(2026, 4, 7, 14, 15, 0)))
+      assert_equal("5.0% remaining of the month (workdays)",
+                   report(true, true, Time.new(2026, 4, 29, 17, 0, 0)))
+      assert_equal("0.0% remaining of the month (workdays)",
+                   report(true, true, Time.new(2026, 4, 30, 17, 0, 0)))
+    end
+
+    def test_report_calendar_days_elapsed
+      assert_equal("0.0% elapsed of the month (calendar days)",
+                   report(false, false, Time.new(2026, 4, 1, 8, 0, 0)))
+      assert_equal("22.3% elapsed of the month (calendar days)",
+                   report(false, false, Time.new(2026, 4, 7, 14, 15, 0)))
+      assert_equal("96.7% elapsed of the month (calendar days)",
+                   report(false, false, Time.new(2026, 4, 29, 17, 0, 0)))
+      assert_equal("100.0% elapsed of the month (calendar days)",
+                   report(false, false, Time.new(2026, 4, 30, 17, 0, 0)))
+    end
+
+    def test_report_workdays_elapsed
+      assert_equal("0.0% elapsed of the month (workdays)",
+                   report(true, false, Time.new(2026, 4, 1, 8, 0, 0)))
+      assert_equal("13.5% elapsed of the month (workdays)",
+                   report(true, false, Time.new(2026, 4, 7, 14, 15, 0)))
+      assert_equal("95.0% elapsed of the month (workdays)",
+                   report(true, false, Time.new(2026, 4, 29, 17, 0, 0)))
+      assert_equal("100.0% elapsed of the month (workdays)",
+                   report(true, false, Time.new(2026, 4, 30, 17, 0, 0)))
     end
   end
 end
