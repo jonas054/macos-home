@@ -1,10 +1,10 @@
 #!/usr/bin/env ruby
 
-IDLE_THRESHOLD = 120  # Gräns för inaktivitet i sekunder
-CHECK_INTERVAL = 10  # Intervall för mätning i sekunder
+IDLE_THRESHOLD = 110  # Gräns för inaktivitet i sekunder
+CHECK_INTERVAL = 50  # Intervall för mätning i sekunder
 
 def idle_seconds
-  raw = `ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF; exit}'`.strip.to_i
+  raw = `ioreg -c IOHIDSystem`.lines.grep(/HIDIdleTime/).last.split.last.to_i
   raw / 1_000_000_000.0
 end
 
@@ -13,8 +13,7 @@ ANSI_CLEAR_SCREEN = "\e[2J\e[H"
 active_time = 0
 total_idle_time = 0
 total_time = 0
-
-puts "Mäter aktiv tid vid tangentbord/mus. Tryck Ctrl+C för att avsluta."
+start_time = Time.now
 
 def format_time(seconds)
   mins, secs = seconds.divmod(60)
@@ -23,15 +22,18 @@ def format_time(seconds)
   text += "#{mins} min #{secs} s = #{(seconds / 3600.0).round(2)} timmar".sub('.', ',')
 end
 
+def percent(time)
+  (100 * time / @passed_time).round(1).to_s.sub('.', ',') + ' %'
+end
+
 begin
   loop do
-    mins, secs = active_time.divmod(60)
-    hrs, mins = mins.divmod(60)
-    puts "#{ANSI_CLEAR_SCREEN}Aktiv:   #{format_time(active_time)}"
-    mins, secs = total_idle_time.divmod(60)
-    hrs, mins = mins.divmod(60)
-    puts "Inaktiv: #{format_time(total_idle_time)}" if total_idle_time > 0
-    puts "Totalt:  #{format_time(total_time)}"
+    @passed_time = Time.now - start_time
+    puts ANSI_CLEAR_SCREEN + "Mäter aktiv tid vid tangentbord/mus. Tryck Ctrl+C för att avsluta."
+    puts "Aktiv:    #{format_time(active_time)} (#{percent(active_time)})"
+    puts "Inaktiv:  #{format_time(total_idle_time)} (#{percent(total_idle_time)})" if total_idle_time > 0
+    puts "Totalt:   #{format_time(total_time)} (#{percent(total_time)})"
+    puts "Förlupen: #{format_time(@passed_time.round)}"
 
     if idle_seconds < IDLE_THRESHOLD
       active_time += CHECK_INTERVAL
