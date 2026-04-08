@@ -2,7 +2,7 @@
 #
 
 USAGE = <<~USAGE
-  Usage: percent_left_of_month [-r|--remaining] [-h|--help] [--test]
+  Usage: percent_of_month [-r|--remaining] [-h|--help] [--test]
 
   Outputs the percentage of the current month that has elapsed or is remaining,
   based on both calendar days and workdays (Mon–Fri, excluding Swedish public holidays).
