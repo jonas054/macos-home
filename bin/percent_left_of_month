@@ -4,8 +4,9 @@
 # based on calendar days and workdays.
 #
 # Usage:
-#   percent_remaining_of_month [--remaining|-r]
-#   percent_remaining_of_month --test             (Run unit tests)
+#   percent_left_of_month [-r|--remaining]
+#   percent_left_of_month --test             (Run unit tests)
+#   percent_left_of_month -h|--help          (Show usage)
 
 require 'date'
 
@@ -81,6 +82,21 @@ def report(only_workdays, show_remaining_time, now = Time.now)
   direction = show_remaining_time ? 'remaining' : 'elapsed'
   which_days = only_workdays ? 'workdays' : 'calendar days'
   "#{percent}% #{direction} of the month (#{which_days})"
+end
+
+if %w[-h --help].any? { ARGV.include?(_1) }
+  puts <<~USAGE
+    Usage: percent_left_of_month [-r|--remaining] [-h|--help] [--test]
+
+    Outputs the percentage of the current month that has elapsed or is remaining,
+    based on both calendar days and workdays (Mon–Fri, excluding Swedish public holidays).
+
+    Options:
+      -r, --remaining   Show percentage remaining (default: elapsed)
+      --test            Run unit tests
+      -h, --help        Show this help message
+  USAGE
+  exit
 end
 
 puts Time.now.strftime('%Y-%m-%d (%A) %H:%M:%S')
