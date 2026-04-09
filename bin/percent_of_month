@@ -58,6 +58,7 @@ def holiday?(date)
     is?(date, 5, 1) ||                     # May Day
     date == easter_sunday + 39 ||          # Ascension Day
     is?(date, 6, 6) ||                     # National Day
+    date == midsummers_eve(date.year) ||   # Midsummer's Eve
     (24..26).any? { is?(date, 12, _1) } || # Christmas
     is?(date, 12, 31)                      # New Year's Eve
 end
@@ -80,6 +81,14 @@ def easter_sunday(year)
   xx = hh + ll - 7 * mm + 114
 
   Date.new(year, xx / 31, (xx % 31) + 1)
+end
+
+def midsummers_eve(year)
+  # Midsummer's Eve is the Friday between June 19 and June 25
+  (19..25).each do |day|
+    date = Date.new(year, 6, day)
+    return date if date.friday?
+  end
 end
 
 def is?(date, month, day)
