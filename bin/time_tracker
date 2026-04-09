@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-IDLE_THRESHOLD = 110  # Gräns för inaktivitet i sekunder
+IDLE_THRESHOLD = 90  # Gräns för inaktivitet i sekunder
 CHECK_INTERVAL = 50  # Intervall för mätning i sekunder
 
 def idle_seconds
@@ -14,9 +14,10 @@ active_time = 0
 total_idle_time = 0
 total_time = 0
 start_time = Time.now
+last_tick = Time.now
 
 def format_time(seconds)
-  mins, secs = seconds.divmod(60)
+  mins, secs = seconds.round.divmod(60)
   hrs, mins = mins.divmod(60)
   text = hrs > 0 ? "#{hrs} timmar " : ''
   text += "#{mins} min #{secs} s = #{(seconds / 3600.0).round(2)} timmar".sub('.', ',')
@@ -26,24 +27,29 @@ def percent(time)
   (100 * time / @passed_time).round(1).to_s.sub('.', ',') + ' %'
 end
 
-begin
-  loop do
-    @passed_time = Time.now - start_time
-    puts ANSI_CLEAR_SCREEN + "Mäter aktiv tid vid tangentbord/mus. Tryck Ctrl+C för att avsluta."
-    puts "Aktiv:    #{format_time(active_time)} (#{percent(active_time)})"
-    puts "Inaktiv:  #{format_time(total_idle_time)} (#{percent(total_idle_time)})" if total_idle_time > 0
-    puts "Totalt:   #{format_time(total_time)} (#{percent(total_time)})"
-    puts "Förlupen: #{format_time(@passed_time.round)}"
-
-    if idle_seconds < IDLE_THRESHOLD
-      active_time += CHECK_INTERVAL
-    else
-      total_idle_time += CHECK_INTERVAL
-    end
-    total_time += CHECK_INTERVAL
-    sleep CHECK_INTERVAL
+loop do
+  @passed_time = Time.now - start_time
+  puts ANSI_CLEAR_SCREEN + "Mäter aktiv tid vid tangentbord/mus. Tryck Ctrl+C för att avsluta."
+  puts "Aktiv:    #{format_time(active_time)} (#{percent(active_time)})"
+  if total_idle_time > 0
+    puts "Inaktiv:  #{format_time(total_idle_time)} (#{percent(total_idle_time)})"
   end
-rescue Interrupt
-  mins, secs = active_time.divmod(60)
-  puts "\nAvslutat. Arbetspass: #{mins} minuter och #{secs} sekunder."
+  puts "Totalt:   #{format_time(total_time)} (#{percent(total_time)})"
+  puts "Förlupen: #{format_time(@passed_time)}"
+
+  sleep CHECK_INTERVAL
+
+  now = Time.now
+  elapsed_interval = now - last_tick
+  last_tick = now
+
+  # Ignorera onormalt långa intervall (t.ex. systemsömn > 2x CHECK_INTERVAL)
+  next if elapsed_interval > CHECK_INTERVAL * 2
+
+  if idle_seconds < IDLE_THRESHOLD
+    active_time += elapsed_interval
+  else
+    total_idle_time += elapsed_interval
+  end
+  total_time += elapsed_interval
 end
