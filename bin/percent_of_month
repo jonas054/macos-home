@@ -19,7 +19,7 @@ WORKDAY_START = 8.0
 WORKDAY_END   = 17.0
 WORKDAY_HOURS = WORKDAY_END - WORKDAY_START
 
-if %w[-h --help].any? { ARGV.include?(_1) }
+if %w[-h --help].any? { |arg| ARGV.include?(arg) }
   puts USAGE
   exit
 end
@@ -30,8 +30,8 @@ def percent_left_of_month(now = Time.now, only_workdays)
   last  = Date.new(today.year, today.month, -1)
 
   if only_workdays
-    month_length = (first..last).count { workday?(_1) }
-    days_left = (first..last).count { _1 >= today && workday?(_1) }
+    month_length = (first..last).count { |date| workday?(date) }
+    days_left = (first..last).count { |date| date >= today && workday?(date) }
   else
     month_length = (last - first + 1).to_f
     days_left = month_length - (today - first).to_f
@@ -51,16 +51,16 @@ end
 
 def holiday?(date)
   easter_sunday = easter_sunday(date.year)
-  is?(date, 1, 1) ||                       # New Year's Day
-    is?(date, 1, 6) ||                     # Epiphany
-    date == easter_sunday - 2 ||           # Good Friday
-    date == easter_sunday + 1 ||           # Easter Monday
-    is?(date, 5, 1) ||                     # May Day
-    date == easter_sunday + 39 ||          # Ascension Day
-    is?(date, 6, 6) ||                     # National Day
-    date == midsummers_eve(date.year) ||   # Midsummer's Eve
-    (24..26).any? { is?(date, 12, _1) } || # Christmas
-    is?(date, 12, 31)                      # New Year's Eve
+  is?(date, 1, 1) ||                          # New Year's Day
+    is?(date, 1, 6) ||                        # Epiphany
+    date == easter_sunday - 2 ||              # Good Friday
+    date == easter_sunday + 1 ||              # Easter Monday
+    is?(date, 5, 1) ||                        # May Day
+    date == easter_sunday + 39 ||             # Ascension Day
+    is?(date, 6, 6) ||                        # National Day
+    date == midsummers_eve(date.year) ||      # Midsummer's Eve
+    (24..26).any? { |d| is?(date, 12, d) } || # Christmas
+    is?(date, 12, 31)                         # New Year's Eve
 end
 
 def easter_sunday(year)
@@ -104,7 +104,7 @@ def report(only_workdays, show_remaining_time, now = Time.now)
 end
 
 puts Time.now.strftime('%Y-%m-%d (%A) %H:%M:%S')
-show_remaining_time = %w[-r --remaining].any? { ARGV.include?(_1) }
+show_remaining_time = %w[-r --remaining].any? { |arg| ARGV.include?(arg) }
 puts report(false, show_remaining_time)
 puts report(true, show_remaining_time)
 
