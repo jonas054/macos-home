@@ -901,7 +901,8 @@ def render_overview(ov: dict) -> str:
         for k, v in sorted(ov["event_counts"].items())
     )
 
-    command = 'cd ' + escape(ov["cwd"] or "") + '; copilot --resume ' + escape(ov["session_id"])
+    resume_command = 'cd ' + escape(ov["cwd"] or "") + '; copilot --resume ' + escape(ov["session_id"])
+    story_command = 'session_view --story ' + escape(ov["session_id"])
     return f"""
     <section class="overview-section">
       <h1 class="page-title">{_COPILOT_IMG} Copilot Session</h1>
@@ -925,9 +926,20 @@ def render_overview(ov: dict) -> str:
               <td>
                 <span class="resume-cmd">
                   <code>
-                    {command}
+                    {resume_command}
                   </code>
-                  <button class="copy-btn" onclick="copyCmd(this, '{command}')" title="Copy">⎘</button>
+                  <button class="copy-btn" onclick="copyCmd(this, '{resume_command}')" title="Copy">⎘</button>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Generate story</td>
+              <td>
+                <span class="resume-cmd">
+                  <code>
+                    {story_command}
+                  </code>
+                  <button class="copy-btn" onclick="copyCmd(this, '{story_command}')" title="Copy">⎘</button>
                 </span>
               </td>
             </tr>
