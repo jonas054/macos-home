@@ -270,17 +270,19 @@ def build_turns(events: list) -> list:
     current_user_msg = None
     current_steps = []
     current_text_parts = []
+    current_text_event_id = None  # event id of first assistant.message in current text batch
 
     def flush_text():
-        nonlocal current_text_parts
+        nonlocal current_text_parts, current_text_event_id
         if current_text_parts:
             text = "\n".join(current_text_parts).strip()
             if text:
-                current_steps.append({"kind": "text", "content": text})
+                current_steps.append({"kind": "text", "content": text, "event_id": current_text_event_id or ""})
         current_text_parts = []
+        current_text_event_id = None
 
     def flush_turn():
-        nonlocal current_user_msg, current_steps, current_text_parts
+        nonlocal current_user_msg, current_steps, current_text_parts, current_text_event_id
         flush_text()
         if current_user_msg is not None or current_steps:
             turns.append({
@@ -290,6 +292,7 @@ def build_turns(events: list) -> list:
         current_user_msg = None
         current_steps = []
         current_text_parts = []
+        current_text_event_id = None
 
     for ev in events:
         t = ev.get("type", "")
@@ -301,11 +304,14 @@ def build_turns(events: list) -> list:
                 "content": d.get("content", ""),
                 "timestamp": ev.get("timestamp"),
                 "interaction_id": d.get("interactionId"),
+                "event_id": ev.get("id", ""),
             }
 
         elif t == "assistant.message":
             text = d.get("content", "").strip()
             if text:
+                if current_text_event_id is None:
+                    current_text_event_id = ev.get("id", "")
                 current_text_parts.append(text)
 
             # Tool requests embedded in the message
@@ -330,6 +336,7 @@ def build_turns(events: list) -> list:
                         "ts_end": sub_end.get("timestamp") if sub_end else None,
                         "result": end_d.get("result"),
                         "success": end_d.get("success", True),
+                        "event_id": sub_start.get("id", ""),
                     })
                 else:
                     current_steps.append({
@@ -341,6 +348,7 @@ def build_turns(events: list) -> list:
                         "ts_end": end_ev.get("timestamp"),
                         "result": end_d.get("result"),
                         "success": end_d.get("success", True),
+                        "event_id": start_ev.get("id", "") or end_ev.get("id", ""),
                     })
 
     flush_turn()
@@ -957,11 +965,14 @@ def render_turns(turns: list) -> str:
 
         if um:
             ts_str = fmt_ts(um.get("timestamp", ""))
+            ev_id = um.get("event_id", "")
+            raw_link = f'<a class="raw-link" href="#" onclick="goToRaw(\'ev-{escape(ev_id)}\');return false;" title="View raw event">⌗</a>' if ev_id else ""
             turn_html += f"""
             <div class="user-bubble">
               <div class="bubble-header">
                 <span class="bubble-role user-role">👤 User</span>
                 <span class="bubble-ts">{ts_str}</span>
+                {raw_link}
               </div>
               <div class="bubble-content md-body">{markdown_to_html(um["content"])}</div>
             </div>"""
@@ -988,9 +999,11 @@ def render_steps(steps: list, turn_idx: int) -> str:
     for j, step in enumerate(steps):
         kind = step.get("kind")
         step_id = f"step-{turn_idx}-{j}"
+        ev_id = step.get("event_id", "")
+        raw_link = f'<a class="raw-link" href="#" onclick="goToRaw(\'ev-{escape(ev_id)}\');return false;" title="View raw event">⌗</a>' if ev_id else ""
 
         if kind == "text":
-            parts.append(f'<div class="text-step md-body">{markdown_to_html(step["content"])}</div>')
+            parts.append(f'<div class="text-step md-body">{markdown_to_html(step["content"])}{raw_link}</div>')
 
         elif kind == "subagent":
             name = step.get("name", "Sub-agent")
@@ -1012,6 +1025,7 @@ def render_steps(steps: list, turn_idx: int) -> str:
                 <span class="tool-icon">{subagent_icon(name)}</span>
                 <span class="tool-name">{escape(name)}</span>
                 <span class="tool-meta">{ts_s} → {ts_e} {'(' + duration + ')' if duration else ''}</span>
+                {raw_link}
               </summary>
               <div class="tool-body">
                 <div class="tool-section-label">Arguments</div>
@@ -1046,6 +1060,7 @@ def render_steps(steps: list, turn_idx: int) -> str:
                 {summary_html}
                 {status_badge}
                 <span class="tool-meta">{ts_s} → {ts_e}</span>
+                {raw_link}
               </summary>
               <div class="tool-body">
                 <div class="tool-section-label">Arguments</div>
@@ -1062,10 +1077,11 @@ def render_raw_events(events: list) -> str:
     for ev in events:
         t = ev.get("type", "")
         ts = fmt_ts(ev.get("timestamp", ""))
-        eid = ev.get("id", "")[:8]
+        eid = ev.get("id", "")
+        eid_short = eid[:8]
         rows.append(f"""
-        <details class="raw-event">
-          <summary><span class="raw-ts">{ts}</span> <span class="raw-type">{escape(t)}</span> <span class="raw-id">{eid}…</span></summary>
+        <details class="raw-event" id="ev-{escape(eid)}">
+          <summary><span class="raw-ts">{ts}</span> <span class="raw-type">{escape(t)}</span> <span class="raw-id">{eid_short}…</span></summary>
           <div class="json-block">{json_html(ev)}</div>
         </details>""")
     return "\n".join(rows)
@@ -1490,10 +1506,24 @@ del { color: #94a3b8; text-decoration: line-through; }
 }
 .raw-event > summary::-webkit-details-marker { display: none; }
 .raw-event > summary:hover { background: #f8fafc; }
+.raw-event.raw-highlight > summary { background: #fef9c3 !important; }
 .raw-ts   { color: #94a3b8; font-family: monospace; }
 .raw-type { font-weight: 600; color: #334155; }
 .raw-id   { color: #94a3b8; font-family: monospace; font-size: 11px; }
 .raw-event .json-block { margin: 8px 6px; }
+.raw-link {
+  font-size: 11px;
+  color: #94a3b8;
+  text-decoration: none;
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.bubble-header:hover .raw-link,
+.tool-summary:hover .raw-link,
+.text-step:hover .raw-link { opacity: 1; }
+.raw-link:hover { color: #6366f1; }
 
 /* ── Nav tabs ── */
 .back-link {
@@ -1584,6 +1614,16 @@ function applyHash() {
 
 window.addEventListener('hashchange', applyHash);
 applyHash();
+
+function goToRaw(id) {
+  showTab('raw', false);
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.open = true;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('raw-highlight');
+  setTimeout(() => el.classList.remove('raw-highlight'), 2000);
+}
 
 function copyCmd(btn, text) {
   navigator.clipboard.writeText(text).then(() => {
