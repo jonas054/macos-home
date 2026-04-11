@@ -20,11 +20,15 @@ def format_time(seconds)
   mins, secs = seconds.round.divmod(60)
   hrs, mins = mins.divmod(60)
   text = hrs > 0 ? "#{hrs} timmar " : ''
-  text += "#{mins} min #{secs} s = #{(seconds / 3600.0).round(2)} timmar".sub('.', ',')
+  text += "#{mins} min #{secs} s = #{sv(seconds / 3600.0, 2)} timmar"
 end
 
 def percent(time)
-  (100 * time / @passed_time).round(1).to_s.sub('.', ',') + ' %'
+  "#{sv(100 * time / @passed_time, 1)} %"
+end
+
+def sv(float, decimals)
+  format("%.#{decimals}f", float).tr('.', ',')
 end
 
 loop do
