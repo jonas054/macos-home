@@ -981,44 +981,85 @@ def json_html(obj)
   text = JSON.pretty_generate(obj, ascii_only: false)
   result = +''
   i = 0
-  while i < text.length
-    ch = text[i]
-    if ch == '"'
+  text_bytesize = text.bytesize
+
+  while i < text_bytesize
+    byte = text.getbyte(i)
+
+    if byte == 34
       j = i + 1
-      while j < text.length
-        if text[j] == '\\'
+      while j < text_bytesize
+        current = text.getbyte(j)
+        if current == 92
           j += 2
           next
         end
-        if text[j] == '"'
+        if current == 34
           j += 1
           break
         end
         j += 1
       end
-      token = text[i...j]
-      klass = text[j..].to_s.lstrip.start_with?(':') ? 'jk' : 'js'
+
+      token = text.byteslice(i, j - i)
+      k = j
+      while k < text_bytesize
+        ws = text.getbyte(k)
+        break unless ws == 32 || ws == 9 || ws == 10 || ws == 13
+
+        k += 1
+      end
+      klass = k < text_bytesize && text.getbyte(k) == 58 ? 'jk' : 'js'
       result << %(<span class="#{klass}">#{escape(token)}</span>)
       i = j
-    elsif ch.match?(/[0-9-]/)
+    elsif byte == 45 || (byte >= 48 && byte <= 57)
       j = i + 1
-      j += 1 while j < text.length && text[j].match?(/[0-9.eE+-]/)
-      result << %(<span class="jn">#{escape(text[i...j])}</span>)
+      while j < text_bytesize
+        current = text.getbyte(j)
+        break unless current == 43 || current == 45 || current == 46 || current == 69 || current == 101 || (current >= 48 && current <= 57)
+
+        j += 1
+      end
+      result << %(<span class="jn">#{escape(text.byteslice(i, j - i))}</span>)
       i = j
-    elsif text[i, 4] == 'true'
+    elsif byte == 116 && text.byteslice(i, 4) == 'true'
       result << '<span class="jb">true</span>'
       i += 4
-    elsif text[i, 5] == 'false'
+    elsif byte == 102 && text.byteslice(i, 5) == 'false'
       result << '<span class="jb">false</span>'
       i += 5
-    elsif text[i, 4] == 'null'
+    elsif byte == 110 && text.byteslice(i, 4) == 'null'
       result << '<span class="jnull">null</span>'
       i += 4
-    elsif '{}[],:'.include?(ch)
-      result << %(<span class="jp">#{escape(ch)}</span>)
+    elsif byte == 123
+      result << '<span class="jp">{</span>'
+      i += 1
+    elsif byte == 125
+      result << '<span class="jp">}</span>'
+      i += 1
+    elsif byte == 91
+      result << '<span class="jp">[</span>'
+      i += 1
+    elsif byte == 93
+      result << '<span class="jp">]</span>'
+      i += 1
+    elsif byte == 44
+      result << '<span class="jp">,</span>'
+      i += 1
+    elsif byte == 58
+      result << '<span class="jp">:</span>'
+      i += 1
+    elsif byte == 38
+      result << '&amp;'
+      i += 1
+    elsif byte == 60
+      result << '&lt;'
+      i += 1
+    elsif byte == 62
+      result << '&gt;'
       i += 1
     else
-      result << escape(ch)
+      result << text.byteslice(i, 1)
       i += 1
     end
   end
