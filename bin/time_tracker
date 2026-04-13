@@ -8,7 +8,7 @@ def idle_seconds
   raw / 1_000_000_000.0
 end
 
-ANSI_CLEAR_SCREEN = "\e[2J\e[H"
+ANSI_CLEAR_SCREEN = "\e[1J\e[H"
 
 active_time = 0
 total_idle_time = 0
