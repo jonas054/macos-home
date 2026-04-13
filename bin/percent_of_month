@@ -13,57 +13,45 @@ USAGE = <<~USAGE
     -h, --help        Show this help message
 USAGE
 
+if %w[-h --help].any? { |arg| ARGV.include?(arg) }
+  puts USAGE
+  exit
+end
+
 require 'date'
 
 WORKDAY_START = 8.0
 WORKDAY_END   = 17.0
 WORKDAY_HOURS = WORKDAY_END - WORKDAY_START
 
-if %w[-h --help].any? { |arg| ARGV.include?(arg) }
-  puts USAGE
-  exit
-end
-
-def percent_left_of_month(now = Time.now, only_workdays)
-  today = now.to_date
-  first = Date.new(today.year, today.month, 1)
-  last  = Date.new(today.year, today.month, -1)
-
-  if only_workdays
-    month_length = (first..last).count { |date| workday?(date) }
-    days_left = (first..last).count { |date| date >= today && workday?(date) }
-  else
-    month_length = (last - first + 1).to_f
-    days_left = month_length - (today - first).to_f
+class Date
+  def workday?
+    !(saturday? || sunday? || holiday?)
   end
 
-  # Fraction of today already elapsed based on workday hours (clamped to [0,1])
-  time_of_day  = now.hour + now.min / 60.0 + now.sec / 3600.0
-  day_fraction = ((time_of_day - WORKDAY_START) / WORKDAY_HOURS).clamp(0.0, 1.0)
-  time_left = days_left - day_fraction
+  def holiday?
+    is?('January', 1) ||                          # New Year's Day
+      is?('January', 6) ||                        # Epiphany
+      easter_based_holiday? ||                    # Easter-related holidays
+      is?('May', 1) ||                            # May Day
+      is?('June', 6) ||                           # National Day
+      self == Date.midsummers_eve(year) ||        # Midsummer's Eve
+      (24..26).any? { |d| is?('December', d) } || # Christmas
+      is?('December', 31)                         # New Year's Eve
+  end
 
-  (100.0 * time_left / month_length).round(1)
+  def easter_based_holiday?
+    easter_sunday = Date.easter_sunday(year)
+    (-2..1).any? { |offset| self == easter_sunday + offset } || # Good Friday to Easter Monday
+      self == easter_sunday + 39                                # Ascension Day
+  end
+
+  def is?(month_name, day_of_month)
+    Date::MONTHNAMES[month] == month_name && day == day_of_month
+  end
 end
 
-def workday?(date)
-  !(date.saturday? || date.sunday? || holiday?(date))
-end
-
-def holiday?(date)
-  easter_sunday = easter_sunday(date.year)
-  is?(date, 1, 1) ||                          # New Year's Day
-    is?(date, 1, 6) ||                        # Epiphany
-    date == easter_sunday - 2 ||              # Good Friday
-    date == easter_sunday + 1 ||              # Easter Monday
-    is?(date, 5, 1) ||                        # May Day
-    date == easter_sunday + 39 ||             # Ascension Day
-    is?(date, 6, 6) ||                        # National Day
-    date == midsummers_eve(date.year) ||      # Midsummer's Eve
-    (24..26).any? { |d| is?(date, 12, d) } || # Christmas
-    is?(date, 12, 31)                         # New Year's Eve
-end
-
-def easter_sunday(year)
+def Date.easter_sunday(year)
   aa = year % 19
   century = year / 100
   year_two_digits = year % 100
@@ -83,16 +71,33 @@ def easter_sunday(year)
   Date.new(year, xx / 31, (xx % 31) + 1)
 end
 
-def midsummers_eve(year)
-  # Midsummer's Eve is the Friday between June 19 and June 25
+# Midsummer's Eve is the Friday between June 19 and June 25
+def Date.midsummers_eve(year)
   (19..25).each do |day|
     date = Date.new(year, 6, day)
     return date if date.friday?
   end
 end
 
-def is?(date, month, day)
-  date == Date.new(date.year, month, day)
+def percent_left_of_month(now = Time.now, only_workdays)
+  today = now.to_date
+  first = Date.new(today.year, today.month, 1)
+  last  = Date.new(today.year, today.month, -1)
+
+  if only_workdays
+    month_length = (first..last).count(&:workday?)
+    days_left = (first..last).count { |date| date >= today && date.workday? }
+  else
+    month_length = (last - first + 1).to_f
+    days_left = month_length - (today - first).to_f
+  end
+
+  # Fraction of today already elapsed based on workday hours (clamped to [0,1])
+  time_of_day  = now.hour + now.min / 60.0 + now.sec / 3600.0
+  day_fraction = ((time_of_day - WORKDAY_START) / WORKDAY_HOURS).clamp(0.0, 1.0)
+  time_left = days_left - day_fraction
+
+  (100.0 * time_left / month_length).round(1)
 end
 
 def report(only_workdays, show_remaining_time, now = Time.now)
@@ -137,24 +142,24 @@ if ARGV.include?('--test')
     end
 
     def test_easter_sunday
-      assert_equal(Date.new(2026, 4, 5), easter_sunday(2026))
-      assert_equal(Date.new(2027, 3, 28), easter_sunday(2027))
-      assert_equal(Date.new(2028, 4, 16), easter_sunday(2028))
-      assert_equal(Date.new(2029, 4, 1), easter_sunday(2029))
-      assert_equal(Date.new(2030, 4, 21), easter_sunday(2030))
-      assert_equal(Date.new(2031, 4, 13), easter_sunday(2031))
+      assert_equal(Date.new(2026, 4, 5), Date.easter_sunday(2026))
+      assert_equal(Date.new(2027, 3, 28), Date.easter_sunday(2027))
+      assert_equal(Date.new(2028, 4, 16), Date.easter_sunday(2028))
+      assert_equal(Date.new(2029, 4, 1), Date.easter_sunday(2029))
+      assert_equal(Date.new(2030, 4, 21), Date.easter_sunday(2030))
+      assert_equal(Date.new(2031, 4, 13), Date.easter_sunday(2031))
     end
 
     def test_workday
-      assert(workday?(Date.new(2026, 4, 1))) # Wednesday
-      assert(workday?(Date.new(2026, 4, 2))) # Thursday
-      assert(!workday?(Date.new(2026, 4, 3))) # Good Friday
-      assert(!workday?(Date.new(2026, 4, 4))) # Easter Saturday
-      assert(!workday?(Date.new(2026, 4, 5))) # Easter Sunday
-      assert(!workday?(Date.new(2026, 4, 6))) # Easter Monday
-      assert(workday?(Date.new(2026, 4, 7))) # Tuesday
-      assert(!workday?(Date.new(2026, 5, 14))) # Ascension Day
-      assert(workday?(Date.new(2026, 5, 15))) # Squeeze day
+      assert(Date.new(2026, 4, 1).workday?)   # Wednesday
+      assert(Date.new(2026, 4, 2).workday?)   # Thursday
+      assert(!Date.new(2026, 4, 3).workday?)  # Good Friday
+      assert(!Date.new(2026, 4, 4).workday?)  # Easter Saturday
+      assert(!Date.new(2026, 4, 5).workday?)  # Easter Sunday
+      assert(!Date.new(2026, 4, 6).workday?)  # Easter Monday
+      assert(Date.new(2026, 4, 7).workday?)   # Tuesday
+      assert(!Date.new(2026, 5, 14).workday?) # Ascension Day
+      assert(Date.new(2026, 5, 15).workday?)  # Squeeze day
     end
 
     def test_report_calendar_days_remaining
