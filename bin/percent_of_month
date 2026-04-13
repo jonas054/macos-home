@@ -112,8 +112,15 @@ puts report(true, show_remaining_time)
 # ----------------------------------------------------------------------
 
 if ARGV.include?('--test')
-  ARGV.shift
-  require 'test/unit'
+  ARGV.shift # Remove --test to avoid interference with test/unit
+  begin
+    require 'test/unit'
+  rescue LoadError
+    system 'gem install --user-install test-unit'
+    system 'percent_of_month --test'
+    exit
+  end
+
   class PercentLeftOfMonthTest < Test::Unit::TestCase
     def test_workdays
       assert_equal(100.0, percent_left_of_month(Time.new(2026, 4, 1, 8, 0, 0), true))
