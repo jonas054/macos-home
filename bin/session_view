@@ -648,7 +648,7 @@ def render_args(args, tool_name: str = "") -> str:
     if not args:
         return ""
     if tool_name == "bash" and isinstance(args, dict) and "command" in args and "description" in args:
-        return f'<div class="code-block">{args["command"]}</div>'
+        return f'<div class="code-block">{escape(args["command"])}</div>'
     if tool_name == "sql" and isinstance(args, dict) and len(args) == 2 and "description" in args and "query" in args:
         return _render_sql_query(args["query"])
     if tool_name == "edit" and isinstance(args, dict) and "old_str" in args and "new_str" in args:
