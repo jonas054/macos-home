@@ -232,15 +232,6 @@
 
 (require 'project)
 
-(defun mdbg-translate-region (beg end)
-  "Translate the selected region in the MDBG Chinese dictionary."
-  (interactive "r")
-  (let* ((url (concat "https://www.mdbg.net/chinese/dictionary?"
-		      "page=translate&email=&trst=0&wdqtm=0&wdqcham=1&trqs="
-		      (url-hexify-string (buffer-substring-no-properties beg end))
-		      "&trtranslation=&trlang=1")))
-    (browse-url url)))
-
 (use-package copilot
   :ensure t
   :hook (prog-mode . copilot-mode)
@@ -255,3 +246,20 @@
 (require 'flycheck-kotlin)
 (add-to-list 'flycheck-checkers 'kotlin-ktlint)
 (add-hook 'kotlin-mode-hook 'flycheck-mode)
+
+;; Convenience functions
+;; --------------------------------------------------------------------------------
+
+(defun indent-buffer ()
+  (interactive)
+  (indent-region (point-min) (point-max)))
+
+(defun mdbg-translate-region (beg end)
+  "Translate the selected region in the MDBG Chinese dictionary."
+  (interactive "r")
+  (let* ((url (concat "https://www.mdbg.net/chinese/dictionary?"
+		      "page=translate&email=&trst=0&wdqtm=0&wdqcham=1&trqs="
+		      (url-hexify-string (buffer-substring-no-properties beg end))
+		      "&trtranslation=&trlang=1")))
+    (browse-url url)))
+
