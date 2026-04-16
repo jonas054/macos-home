@@ -1,6 +1,7 @@
 ;;; init-local.el --- Hand-written Emacs settings -*- lexical-binding: t; -*-
 
-(setq inhibit-startup-screen t
+(setq search-upper-case t
+      inhibit-startup-screen t
       initial-scratch-message nil
       ring-bell-function #'ignore
       use-dialog-box nil
@@ -177,7 +178,7 @@
 (define-key global-map [C-S-right] 'enlarge-window-horizontally)
 (define-key global-map [C-S-up] 'enlarge-window)
 (define-key global-map [C-S-down] 'shrink-window)
-(global-set-key [(control f11)]   'isearch-toggle-case-fold)
+(define-key isearch-mode-map [(control f11)] 'isearch-toggle-case-fold)
 (global-set-key (kbd "C-.") 'dabbrev-expand) ;; M-/ takes 3 keys - too inconvenient!
 (global-set-key (kbd "C-#") 'comment-or-uncomment-region)
 (global-set-key (kbd "C-x C-b") 'electric-buffer-list)
