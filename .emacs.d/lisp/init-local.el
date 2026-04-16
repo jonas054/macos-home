@@ -251,3 +251,7 @@
               ("C-TAB" . copilot-accept-completion-by-word)
               ("C-n" . copilot-next-completion)
               ("C-p" . copilot-previous-completion)))
+
+(require 'flycheck-kotlin)
+(add-to-list 'flycheck-checkers 'kotlin-ktlint)
+(add-hook 'kotlin-mode-hook 'flycheck-mode)
