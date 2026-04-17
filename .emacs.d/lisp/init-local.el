@@ -232,6 +232,10 @@
 
 (require 'project)
 
+(use-package inf-ruby
+  :ensure t
+  :commands (run-ruby))
+
 (use-package copilot
   :ensure t
   :hook (prog-mode . copilot-mode)
@@ -262,4 +266,3 @@
 		      (url-hexify-string (buffer-substring-no-properties beg end))
 		      "&trtranslation=&trlang=1")))
     (browse-url url)))
-

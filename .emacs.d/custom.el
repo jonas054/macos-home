@@ -6,7 +6,7 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
-   '(copilot flycheck-kotlin kotlin-mode magit markdown-mode
+   '(copilot flycheck-kotlin inf-ruby kotlin-mode magit markdown-mode
 	     transpose-frame yaml-mode))
  '(safe-local-variable-values '((whitespace-line-column 100))))
 ;;(custom-set-faces
