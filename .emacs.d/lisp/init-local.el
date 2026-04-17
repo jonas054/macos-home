@@ -189,6 +189,11 @@
 (define-key global-map [C-f8] 'flop-frame)
 (define-key global-map [M-f8] 'toggle-truncate-lines)
 
+;; Mappings for file finding.
+(define-key global-map (kbd "C-c f r") 'recentf-open-files)
+(define-key global-map (kbd "C-c f f") 'find-dired)
+
+
 ;; Transpose lines (i.e., switch current and adjacent line) up and
 ;; down.  This effectively allows moving the current line up or down
 ;; by one line, without needing to select or kill the whole line
