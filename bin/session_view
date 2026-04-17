@@ -2468,7 +2468,10 @@ def _parse_json_events(jsonl_path: str) -> None:
                 tool_requests = data.get('toolRequests', [])
                 tools = [tr.get('name') for tr in tool_requests]
                 reasoning_text = data.get('reasoningText', {})
-                f.write(f"Event {i}: ASSISTANT MESSAGE - Tools: {tools}, Reasoning: '{reasoning_text}', Content: {content[:300]}\n")
+                f.write(f"Event {i}: ASSISTANT MESSAGE - "
+                        f"<tools>{tools}</tools>"
+                        f"<reasoning>{reasoning_text}</reasoning>"
+                        f"<content>{content}</content>\n")
             elif event_type == 'assistant.turn_end' or event_type == 'assistant.turn_start':
                 continue
             elif event_type == 'tool.execution_complete':
