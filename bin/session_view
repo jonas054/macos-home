@@ -351,6 +351,11 @@ def build_turns(events: list) -> list:
             }
 
         elif t == "assistant.message":
+            reasoning = d.get("reasoningText", "").strip()
+            if reasoning:
+                flush_text()
+                current_steps.append({"kind": "reasoning", "content": reasoning, "event_id": ev.get("id", "")})
+
             text = d.get("content", "").strip()
             if text:
                 if current_text_event_id is None:
@@ -360,7 +365,11 @@ def build_turns(events: list) -> list:
             # Tool requests embedded in the message
             for tr in d.get("toolRequests", []):
                 if tr.get("name") == "report_intent":
-                    continue  # internal plumbing, skip
+                    intent_text = tr.get("arguments", {}).get("intent", "").strip()
+                    if intent_text:
+                        flush_text()
+                        current_steps.append({"kind": "intent", "content": intent_text, "event_id": ev.get("id", "")})
+                    continue
                 flush_text()
                 cid = tr.get("toolCallId")
                 end_ev = exec_ends.get(cid, {})
@@ -1139,7 +1148,26 @@ def render_steps(steps: list, turn_idx: int) -> str:
         ev_id = step.get("event_id", "")
         raw_link = f'<a class="raw-link" href="#" onclick="goToRaw(\'ev-{escape(ev_id)}\');return false;" title="View raw event">⌗</a>' if ev_id else ""
 
-        if kind == "text":
+        if kind == "reasoning":
+            preview = abbreviate(step["content"], 140)
+            preview_html = f'<span class="tool-intent">{escape(preview)}</span>' if preview else ""
+            parts.append(f"""
+            <details class="tool-step reasoning-step" id="{step_id}">
+              <summary class="tool-summary" style="background:#f5f3ff;border-left:3px solid #8b5cf6">
+                <span class="tool-icon">🧠</span>
+                <span class="tool-name">reasoning</span>
+                {preview_html}
+                {raw_link}
+              </summary>
+              <div class="tool-body reasoning-body">
+                <div class="reasoning-content">{markdown_to_html(step["content"])}</div>
+              </div>
+            </details>""")
+
+        elif kind == "intent":
+            parts.append(f'<div class="intent-step">🎯 <span class="intent-text">{escape(step["content"])}</span></div>')
+
+        elif kind == "text":
             parts.append(f'<div class="text-step md-body">{markdown_to_html(step["content"])}{raw_link}</div>')
 
         elif kind == "subagent":
@@ -1506,6 +1534,90 @@ details[open] > .tool-summary { border-bottom: 1px solid #e2e8f0; }
 /* ── Text steps ── */
 .text-step { padding: 4px 0 8px; }
 
+/* ── Reasoning (thinking) steps ── */
+.reasoning-step {
+  border-color: #ddd6fe;
+}
+
+.reasoning-body {
+  background: #fcfaff;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.reasoning-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.reasoning-step[open] > .tool-summary {
+  border-bottom-color: #ddd6fe;
+}
+
+.reasoning-icon {
+  color: #7c3aed;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+.reasoning-content > :first-child { margin-top: 0; }
+.reasoning-content > :last-child { margin-bottom: 0; }
+.reasoning-content .md-p:last-child { margin-bottom: 0; }
+.reasoning-body a { color: #7c3aed; }
+.reasoning-body a:hover { color: #6d28d9; }
+.reasoning-body .md-h1,
+.reasoning-body .md-h2,
+.reasoning-body .md-h3,
+.reasoning-body .md-h4,
+.reasoning-body .md-h5,
+.reasoning-body .md-h6 {
+  color: #4c1d95;
+  border-color: #ddd6fe;
+}
+.reasoning-body .md-blockquote {
+  background: #f5f3ff;
+  border-left-color: #c4b5fd;
+  color: #5b21b6;
+}
+.reasoning-body code.md-code {
+  background: white;
+  border-color: #ddd6fe;
+  color: #7c3aed;
+}
+.reasoning-body .md-table th,
+.reasoning-body .md-table td {
+  border-color: #ddd6fe;
+}
+.reasoning-body .md-table th {
+  background: #f5f3ff;
+  color: #5b21b6;
+}
+.reasoning-body .md-table tr:nth-child(even) td { background: #faf5ff; }
+
+/* ── Intent steps ── */
+.intent-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0 3px 2px;
+  margin-bottom: 4px;
+}
+.intent-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  padding: 1px 10px;
+}
+
 /* ── Markdown body ── */
 .md-body { line-height: 1.7; }
 
@@ -1669,6 +1781,7 @@ del { color: #94a3b8; text-decoration: line-through; }
 .bubble-header:hover .raw-link,
 .tool-summary:hover .raw-link,
 .text-step:hover .raw-link { opacity: 1; }
+.reasoning-body:hover .raw-link { opacity: 1; }
 .raw-link:hover { color: #6366f1; }
 
 /* ── Nav tabs ── */
