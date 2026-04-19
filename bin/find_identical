@@ -1,13 +1,117 @@
 #!/usr/bin/env ruby
+#
+require 'find'
+require 'fileutils'
 
-Dir['**/*']
-  .select { |path| File.file?(path) }
-  .group_by { |path| File.basename(path) }
-  .values
-  .select { |files| files.size > 1 }
-  .each do |files|
-  files.sort!
-  files.each_with_index do |f, ix|
-    puts "rm #{f}" if ix > 0 && File.read(f).sum == File.read(files[ix - 1]).sum
-  end
+def main
+  dirs, min_size, rm_flag, rm_regexp, format = parse_args
+
+  table = find_files dirs, min_size
+
+  table.sort_by { |size, paths| paths }.each { |size, paths|
+    paths.uniq!
+    paths.each_with_index { |path1, ix1|
+      paths[(ix1+1)..-1].each { |path2|
+        if rm_regexp
+          matches, non_matches = [path1, path2].partition { |p| p =~ rm_regexp }
+          next if matches.size != 1
+          match = rm_flag == '--rm' ? matches[0] : non_matches[0]
+        end
+        if same_contents size, path1, path2
+          if format == :one_line
+            puts "#{path1} and #{path2} are identical"
+          else
+            puts "Identical:", "  " + `ls -l "#{path1}"`,"  " + `ls -l "#{path2}"`
+          end
+          if rm_regexp
+            if matches.size == 1
+              if File.basename(path1) == File.basename(path2)
+                remove :unconditional, match
+              else
+                remove :different_names, match # identical but with different names
+              end
+            end
+          elsif rm_flag == '--ask'
+            remove :ask, path1 unless remove :ask, path2
+          end
+        end
+      }
+    }
+  }
 end
+
+def find_files(dirs, min_size)
+  table = Hash.new []
+  dirs.each { |dir|
+    Find.find(dir) { |f|
+      # Find.prune if f.sub(/^#{dir}/, '') =~ %r'/\.\w+' or File.symlink?(f)
+      Find.prune if File.symlink?(f)
+      table[File.size(f)] += [f] unless File.directory? f
+    }
+  }
+  table.reject! { |size,| size < min_size }
+  table.sort_by { |size, paths| paths }
+end
+
+def parse_args
+  dirs = []
+  min_size = 5
+  format = :one_line
+
+  while ARGV.any?
+    case ARGV.first
+    when '--rm', '--keep'
+      rm_flag = ARGV.shift
+      rm_regexp = Regexp.new ARGV.first
+    when '--ask'
+      rm_flag = ARGV.first
+    when '-f'
+      format = :more_readable
+    when '-s'
+      ARGV.shift
+      min_size = ARGV.first.to_i
+    when /^-/
+      usage
+    else
+      dirs << ARGV.first.chomp('/').chomp('\\')
+    end
+    ARGV.shift
+  end
+  dirs = ['.'] if dirs.empty?
+  [dirs, min_size, rm_flag, rm_regexp, format]
+end
+
+def usage
+  puts "Usage: find_identical [{--rm|--keep} <pattern>] [-s <min_size>] [<dirs>]"
+  puts "       find_identical --ask [-s <min_size>] [<dirs>]"
+  exit
+end
+
+def same_contents(size, path1, path2)
+  return false unless File.exist? path1 and File.exist? path2
+  block = 1024 * 1024
+  0.step(size, block) { |offs|
+    return false if IO.read(path1, block, offs) != IO.read(path2, block, offs)
+  }
+  true
+end
+
+def remove(mode, path)
+  while mode == :ask || mode == :different_names and not @yes_to_all and not @no_to_all
+    print "Remove #{path} y(es)/n(o)/A(ll)"
+    print "/N(one with different names)" if mode == :different_names
+    print "? "
+    case ($stdin.gets || 'N').strip
+    when 'y' then break
+    when 'n' then return false
+    when 'A' then @yes_to_all = true
+    when 'N' then @no_to_all = true
+    end
+  end
+  return false if @no_to_all and mode == :different_names
+  FileUtils.rm path
+  puts "Removed #{path}" if mode == :unconditional or @yes_to_all
+  true
+end
+
+main if $PROGRAM_NAME == __FILE__
