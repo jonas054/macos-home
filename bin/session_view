@@ -2507,6 +2507,7 @@ def generate_story(jsonl_path: str, force: bool = False, language: str = None) -
     _parse_json_events(jsonl_path)  # ensure events.txt is up to date
     with open(_parsed_json_path(jsonl_path), encoding="utf-8") as fh:
         events_txt = fh.read()
+    events_txt = events_txt.replace("\x00", "")  # strip null bytes from binary diffs
 
     prompt = (
         f"Read the Copilot session below and write a text in the {language} language "
