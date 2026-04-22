@@ -16,11 +16,13 @@ total_time = 0
 start_time = Time.now
 last_tick = Time.now
 
-def format_time(seconds)
+def format_time(seconds, style = :with_percent)
   mins, secs = seconds.round.divmod(60)
   hrs, mins = mins.divmod(60)
   text = hrs > 0 ? "#{hrs} timmar " : ''
   text += "#{mins} min #{secs} s = #{sv(seconds / 3600.0, 2)} timmar"
+  text += " (#{percent(seconds)})" if style == :with_percent
+  text
 end
 
 def percent(time)
@@ -34,12 +36,13 @@ end
 loop do
   @passed_time = Time.now - start_time
   puts ANSI_CLEAR_SCREEN + "Mäter aktiv tid vid tangentbord/mus. Tryck Ctrl+C för att avsluta."
-  puts "Aktiv:    #{format_time(active_time)} (#{percent(active_time)})"
+  puts "Aktiv:    #{format_time(active_time)}"
+  puts "Plus 15%: #{format_time(active_time * 1.15)}"
   if total_idle_time > 0
-    puts "Inaktiv:  #{format_time(total_idle_time)} (#{percent(total_idle_time)})"
+    puts "Inaktiv:  #{format_time(total_idle_time)}"
   end
-  puts "Totalt:   #{format_time(total_time)} (#{percent(total_time)})"
-  puts "Förlupen: #{format_time(@passed_time)}"
+  puts "Totalt:   #{format_time(total_time)}"
+  puts "Förlupen: #{format_time(@passed_time, :without_percent)}"
 
   sleep CHECK_INTERVAL
 
