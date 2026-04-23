@@ -230,6 +230,19 @@
 
 ;; --------------------------------------------------------------------------------
 
+;; Jump to matching parenthesis / bracket
+;; --------------------------------------------------------------------------------
+
+(defun match-paren ()
+  "Jump to the matching delimiter if on one, otherwise do nothing."
+  (interactive)
+  (cond ((looking-at "\\s(") (forward-list 1) (backward-char 1))
+        ((looking-at "\\s)") (forward-char 1) (backward-list 1))))
+
+(global-set-key (kbd "C-%") #'match-paren)
+
+;; --------------------------------------------------------------------------------
+
 (global-set-key (kbd "C-c e r") #'ediff-revision)
 (global-set-key (kbd "C-c e b") #'ediff-buffers)
 
