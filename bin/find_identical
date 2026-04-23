@@ -76,7 +76,7 @@ def parse_args
       format = :more_readable
     when '-s'
       ARGV.shift
-      min_size = ARGV.first.to_i
+      min_size = ARGV.first.gsub(/_/, '').to_i
     when /^-/
       usage
     else
