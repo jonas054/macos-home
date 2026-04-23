@@ -44,12 +44,19 @@ def find_files(dirs, min_size)
   table = Hash.new []
   dirs.each { |dir|
     Find.find(dir) { |f|
-      # Find.prune if f.sub(/^#{dir}/, '') =~ %r'/\.\w+' or File.symlink?(f)
       Find.prune if File.symlink?(f)
-      table[File.size(f)] += [f] unless File.directory? f
+      if File.directory?(f)
+        begin
+          Dir.open(f) { }
+        rescue Errno::EPERM, Errno::EACCES
+          Find.prune
+        end
+      else
+        size = File.size(f)
+        table[size] += [f] if size >= min_size
+      end
     }
   }
-  table.reject! { |size,| size < min_size }
   table.sort_by { |size, paths| paths }
 end
 
