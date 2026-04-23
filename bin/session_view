@@ -2642,6 +2642,8 @@ def main():
                 print(f"Up to date: {output_path}")
                 return
         process_file(input_path, output_path, a11y=args.a11y, story=args.story, force=args.force, language=args.language)
+        if args.story:
+            generate_overview()
     else:
         # ── Batch mode: glob all session events ───────────────────────
         if args.story:
