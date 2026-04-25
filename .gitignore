@@ -13,6 +13,7 @@
 .emacs.d/ido.last
 .emacs.d/multisession/
 .emacs.d/places
+.emacs.d/projects
 .emacs.d/recentf
 .emacs.d/transient/
 .emacs.d/var/
