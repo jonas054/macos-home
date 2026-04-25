@@ -1114,14 +1114,31 @@ def render_turns(turns: list) -> str:
             ts_str = fmt_ts(um.get("timestamp", ""))
             ev_id = um.get("event_id", "")
             raw_link = f'<a class="raw-link" href="#" onclick="goToRaw(\'ev-{escape(ev_id)}\');return false;" title="View raw event">⌗</a>' if ev_id else ""
-            turn_html += f"""
+            content = um["content"]
+            skill_match = re.match(r'\s*<skill-context\s+name=["\']?([^"\'>\s]+)["\']?', content, re.IGNORECASE)
+            if skill_match:
+                skill_name = skill_match.group(1)
+                turn_html += f"""
+            <details class="tool-step skill-context-step" id="turn-{i}-skill">
+              <summary class="tool-summary" style="background:#fffbeb;border-left:3px solid #f59e0b">
+                <span class="tool-icon">🎯</span>
+                <span class="tool-name">skill: {escape(skill_name)}</span>
+                <span class="bubble-ts">{ts_str}</span>
+                {raw_link}
+              </summary>
+              <div class="tool-body">
+                <pre class="result-pre">{escape(content)}</pre>
+              </div>
+            </details>"""
+            else:
+                turn_html += f"""
             <div class="user-bubble">
               <div class="bubble-header">
                 <span class="bubble-role user-role">👤 User</span>
                 <span class="bubble-ts">{ts_str}</span>
                 {raw_link}
               </div>
-              <div class="bubble-content md-body">{markdown_to_html(um["content"])}</div>
+              <div class="bubble-content md-body">{markdown_to_html(content)}</div>
             </div>"""
 
         if steps:
