@@ -171,6 +171,13 @@
 (define-key global-map [f11]  'grep)
 (define-key global-map [f12]  'compile)
 (define-key global-map [S-left] 'windmove-left)
+
+;; Prefer mlgrep as the default grep command when available
+(when (executable-find "mlgrep")
+  (setq grep-program "mlgrep")
+  (setq grep-command "mlgrep -S ")
+  (when (boundp 'grep-find-command)
+    (setq grep-find-command "mlgrep -S ")))
 (define-key global-map [S-right] 'windmove-right)
 (define-key global-map [S-up] 'windmove-up)
 (define-key global-map [S-down] 'windmove-down)
