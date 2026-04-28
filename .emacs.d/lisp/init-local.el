@@ -234,10 +234,16 @@
 ;; --------------------------------------------------------------------------------
 
 (defun match-paren ()
-  "Jump to the matching delimiter if on one, otherwise do nothing."
+  "Jump to the matching delimiter if on one, otherwise do nothing.
+For closing delimiters, we jump to the position right after to work the same as
+highlighting."
   (interactive)
-  (cond ((looking-at "\\s(") (forward-list 1) (backward-char 1))
-        ((looking-at "\\s)") (forward-char 1) (backward-list 1))))
+  (cond
+   ((looking-at "\\s(") (forward-list 1))
+   ((save-excursion
+      (backward-char 1)
+      (looking-at "\\s)"))
+    (backward-list 1))))
 
 (global-set-key (kbd "C-%") #'match-paren)
 
