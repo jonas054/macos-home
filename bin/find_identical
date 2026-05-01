@@ -6,7 +6,8 @@ require 'fileutils'
 def main
   dirs, min_size, rm_flag, rm_regexp, format = parse_args
 
-  table = find_files dirs, min_size
+  table = Hash.new []
+  find_files dirs, min_size, table
 
   table.sort_by { |size, paths| paths }.each { |size, paths|
     paths.uniq!
@@ -40,24 +41,24 @@ def main
   }
 end
 
-def find_files(dirs, min_size)
-  table = Hash.new []
-  dirs.each { |dir|
-    Find.find(dir) { |f|
-      Find.prune if File.symlink?(f)
-      if File.directory?(f)
-        begin
-          Dir.open(f) { }
-        rescue Errno::EPERM, Errno::EACCES
-          Find.prune
-        end
-      else
-        size = File.size(f)
-        table[size] += [f] if size >= min_size
-      end
-    }
+def find_files(dirs, min_size, table)
+  dirs.map { Dir["#{_1}/.*"] + Dir["#{_1}/*"] }.flatten.each { |child|
+    next if child.end_with?('/.') or File.symlink? child
+    next unless File.readable? child
+
+    # Skip Apple Photos library package, which will contain many files
+    # with identical contents (e.g. "originals" and "modified"
+    # versions of the same photo).
+    next if child =~ /Photos Library\.photoslibrary/
+    # Problematic directory on MacOS.
+    next if File.join(Dir.pwd, child) =~ /Library\/Containers/
+
+    if File.directory?(child)
+      find_files [child], min_size, table
+    elsif File.size(child) >= min_size
+      table[File.size(child)] += [child]
+    end
   }
-  table.sort_by { |size, paths| paths }
 end
 
 def parse_args
