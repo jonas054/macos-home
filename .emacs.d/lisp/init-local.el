@@ -269,6 +269,9 @@
 (add-to-list 'flycheck-checkers 'kotlin-ktlint)
 (add-hook 'kotlin-mode-hook 'flycheck-mode)
 
+(use-package adoc-mode
+  :ensure t)
+
 ;; Convenience functions
 ;; --------------------------------------------------------------------------------
 
