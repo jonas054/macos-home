@@ -417,6 +417,51 @@ CSS = <<~'CSS'
   .grep-match { background: #854d0e; color: #fef08a; border-radius: 2px; font-style: normal; }
 
   .text-step { padding: 4px 0 8px; }
+
+  /* ── Reasoning (thinking) steps ── */
+  .reasoning-step { border-color: #ddd6fe; }
+  .reasoning-body {
+    background: #fcfaff;
+    font-size: 13px;
+    color: #475569;
+    line-height: 1.6;
+  }
+  .reasoning-step[open] > .tool-summary { border-bottom-color: #ddd6fe; }
+  .reasoning-content > :first-child { margin-top: 0; }
+  .reasoning-content > :last-child { margin-bottom: 0; }
+  .reasoning-content .md-p:last-child { margin-bottom: 0; }
+  .reasoning-body a { color: #7c3aed; }
+  .reasoning-body a:hover { color: #6d28d9; }
+  .reasoning-body .md-h1,
+  .reasoning-body .md-h2,
+  .reasoning-body .md-h3,
+  .reasoning-body .md-h4,
+  .reasoning-body .md-h5,
+  .reasoning-body .md-h6 { color: #4c1d95; border-color: #ddd6fe; }
+  .reasoning-body .md-blockquote { background: #f5f3ff; border-left-color: #c4b5fd; color: #5b21b6; }
+  .reasoning-body code.md-code { background: white; border-color: #ddd6fe; color: #7c3aed; }
+  .reasoning-body .md-table th,
+  .reasoning-body .md-table td { border-color: #ddd6fe; }
+  .reasoning-body .md-table th { background: #f5f3ff; color: #5b21b6; }
+  .reasoning-body .md-table tr:nth-child(even) td { background: #faf5ff; }
+
+  /* ── Intent steps ── */
+  .intent-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0 3px 2px;
+    margin-bottom: 4px;
+  }
+  .intent-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #92400e;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: 12px;
+    padding: 1px 10px;
+  }
   .md-body { line-height: 1.7; }
   .md-body .md-p { margin: 0 0 10px; }
 
@@ -569,7 +614,8 @@ CSS = <<~'CSS'
   }
   .bubble-header:hover .raw-link,
   .tool-summary:hover .raw-link,
-  .text-step:hover .raw-link { opacity: 1; }
+  .text-step:hover .raw-link,
+  .reasoning-body:hover .raw-link { opacity: 1; }
   .raw-link:hover { color: #6366f1; }
 
   .back-link {
@@ -872,7 +918,7 @@ OVERVIEW_JS = <<~'JS'
           `<td class="cwd" title="${escHtml(item.cwd)}">${escHtml(item.cwd_display)}</td>` +
           `<td class="model">${escHtml(item.model)}</td>` +
           `<td class="activity" title="user prompts + agent intents">${escHtml(item.activity)}</td>` +
-          `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}">${item.has_story ? '📖' : ''}</td>` +
+          `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}"><a href="file://${escHtml(item.link)}#story">${item.has_story ? '📖' : ''}</a></td>` +
           `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
         frag.appendChild(tr);
       }
@@ -1216,6 +1262,12 @@ def build_turns(events)
         'event_id' => event.fetch('id', '')
       }
     when 'assistant.message'
+      reasoning = data.fetch('reasoningText', '').strip
+      unless reasoning.empty?
+        flush_text.call
+        current_steps << { 'kind' => 'reasoning', 'content' => reasoning, 'event_id' => event.fetch('id', '') }
+      end
+
       text = data.fetch('content', '').strip
       unless text.empty?
         current_text_event_id ||= event.fetch('id', '')
@@ -1223,7 +1275,14 @@ def build_turns(events)
       end
 
       (data['toolRequests'] || []).each do |request|
-        next if request['name'] == 'report_intent'
+        if request['name'] == 'report_intent'
+          intent_text = (request.fetch('arguments', {}) || {}).fetch('intent', '').strip
+          unless intent_text.empty?
+            flush_text.call
+            current_steps << { 'kind' => 'intent', 'content' => intent_text, 'event_id' => event.fetch('id', '') }
+          end
+          next
+        end
 
         flush_text.call
         cid = request['toolCallId']
@@ -1852,6 +1911,24 @@ def render_steps(steps, turn_idx)
     raw_link = event_id.empty? ? '' : %(<a class="raw-link" href="#" onclick="goToRaw('ev-#{escape(event_id)}');return false;" title="View raw event">⌗</a>)
 
     case step['kind']
+    when 'reasoning'
+      preview = abbreviate(step['content'], 140)
+      preview_html = preview.empty? ? '' : %(<span class="tool-intent">#{escape(preview)}</span>)
+      <<~HTML
+        <details class="tool-step reasoning-step" id="#{step_id}">
+          <summary class="tool-summary" style="background:#f5f3ff;border-left:3px solid #8b5cf6">
+            <span class="tool-icon">🧠</span>
+            <span class="tool-name">reasoning</span>
+            #{preview_html}
+            #{raw_link}
+          </summary>
+          <div class="tool-body reasoning-body">
+            <div class="reasoning-content">#{markdown_to_html(step['content'])}</div>
+          </div>
+        </details>
+      HTML
+    when 'intent'
+      %(<div class="intent-step">🎯 <span class="intent-text">#{escape(step['content'])}</span></div>)
     when 'text'
       %(<div class="text-step md-body">#{markdown_to_html(step['content'])}#{raw_link}</div>)
     when 'subagent'
@@ -2051,7 +2128,7 @@ def parse_json_events(jsonl_path)
       when 'assistant.message'
         tools = (data.fetch('toolRequests', []) || []).map { |request| request['name'] }
         content = data.fetch('content', '')
-        file.write("Event #{idx}: ASSISTANT MESSAGE - Tools: #{tools}, Reasoning: '#{data.fetch('reasoningText', {})}', Content: #{content[0, 300]}\n")
+        file.write("Event #{idx}: ASSISTANT MESSAGE - <tools>#{tools}</tools><reasoning>#{data.fetch('reasoningText', '')}</reasoning><content>#{content}</content>\n")
       when 'assistant.turn_end', 'assistant.turn_start'
         next
       when 'tool.execution_complete'
@@ -2075,6 +2152,7 @@ def generate_story(jsonl_path, force: false, language: nil)
   language ||= 'English'
   parse_json_events(jsonl_path)
   events_txt = File.read(parsed_json_path(jsonl_path), encoding: 'UTF-8')
+  events_txt = events_txt.gsub("\x00", '') # strip null bytes from binary diffs
   prompt = "Read the Copilot session below and write a text in the #{language} language suitable for text-to-speech. Describe the conversation between the user and Copilot: what the user asked, what problems were solved, what tools Copilot used, and how things progressed step by step. Include details from all the events. Do not include code blocks or markdown formatting. Keep technical details from the code, which are hard for a text-to-speech function to pronounce, to a minimum. Avoid esoteric characters like '→'. Start with the heading 'Story generated by #{model}' (heading in English). Output the story directly as plain text in your response — do not write it to any file and do not use any tools.\n\n<session_events>\n#{events_txt}\n\n</session_events>\n"
 
   print '  ✦ Generating story… '
@@ -2382,6 +2460,7 @@ def main(argv = ARGV)
       end
     end
     process_file(input_path, output_path, a11y: options[:a11y], story: options[:story], force: options[:force], language: options[:language])
+    generate_overview if options[:story]
   else
     if options[:story]
       warn 'Error: --story is not valid in batch mode.'
