@@ -6,8 +6,8 @@
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
-   '(adoc-mode copilot flycheck-kotlin inf-ruby kotlin-mode lsp-mode
-	       magit markdown-mode rustic transpose-frame typescript-mode yaml-mode))
+   '(adoc-mode copilot doom-themes flycheck-kotlin inf-ruby kotlin-mode lsp-mode
+	       magit markdown-mode rustic mixed-pitch org-modern transpose-frame typescript-mode yaml-mode))
  '(safe-local-variable-values '((whitespace-line-column 100))))
 ;;(custom-set-faces
  ;; custom-set-faces was added by Custom.
@@ -20,4 +20,7 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
+ '(org-level-1 ((t (:height 1.4 :weight bold))))
+ '(org-level-2 ((t (:height 1.3 :weight bold))))
+ '(org-level-3 ((t (:height 1.2))))
  )
