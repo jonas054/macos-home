@@ -196,9 +196,37 @@
 (define-key global-map [C-f8] 'flop-frame)
 (define-key global-map [M-f8] 'toggle-truncate-lines)
 
+;; File finding
+;; --------------------------------------------------------------------------------
+
+;; Use ido to open a minibuffer with the guessed path as default
+;; Note: Doesn't seem to work!
+(defun ido-find-file-at-point-by-default ()
+  "Use ido to open the file at point, with the guessed path as default."
+  (interactive)
+  (let* ((file (ffap-guesser))
+         (dir (and file (file-name-directory (expand-file-name file)))))
+    (let ((default-directory (if (and dir (file-directory-p dir)) dir default-directory)))
+      (ido-find-file))))
+
+;; Use ido for find-file-at-point
+(defun ido-find-file-at-point ()
+  "Use ido to open the file at point."
+  (interactive)
+  (let ((file (ffap-guesser)))
+    (if file
+        (find-file (expand-file-name file))
+      (ido-find-file))))
+
 ;; Mappings for file finding.
+(global-set-key (kbd "C-x C-f") 'ido-find-file-at-point)
 (define-key global-map (kbd "C-c f r") 'recentf-open-files)
 (define-key global-map (kbd "C-c f f") 'find-dired)
+
+;; No ffap in Dired — use plain ido-find-file there.
+(add-hook 'dired-mode-hook
+          (lambda ()
+            (local-set-key (kbd "C-x C-f") 'ido-find-file)))
 
 
 ;; Transpose lines (i.e., switch current and adjacent line) up and
