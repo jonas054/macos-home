@@ -130,12 +130,15 @@
 (defvar theme-cycle--index 0
   "Index into the filtered theme list for the theme cycle.")
 
-(defvar theme-cycle-blocklist '(light-blue)
-  "Themes excluded from the cycle.")
+(defvar theme-cycle-blocklist '("blue" "dark" "vivendi" "black")
+  "Substrings of themes excluded from the cycle.")
 
 (defun theme-cycle--themes ()
   "Return available themes with `theme-cycle-blocklist' removed."
-  (cl-remove-if (lambda (th) (memq th theme-cycle-blocklist))
+  (cl-remove-if (lambda (th)
+                  (seq-some (lambda (substring)
+                              (string-match-p substring (symbol-name th)))
+                            theme-cycle-blocklist))
                 (custom-available-themes)))
 
 (defun theme-cycle--load (index)
