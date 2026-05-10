@@ -2086,6 +2086,26 @@ body {
 .mu-table .num { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums; }
 .mu-premium { color: #7c3aed; font-weight: 600; }
 .mu-total td { border-top: 2px solid #e2e8f0; border-bottom: none; font-weight: 600; }
+/* Search snippet styling */
+.snippet-row td {
+  background: #ffffff;
+  color: #475569;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  white-space: normal;
+}
+mark.search-match {
+  background: #fff4cc;
+  color: inherit;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.snippet-label {
+  color: #64748b;
+  font-size: 12px;
+  margin-right: 6px;
+}
 """
 
 OVERVIEW_JS = """
@@ -2124,6 +2144,47 @@ function escHtml(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function escapeRegExp(s) {
+  // Avoid complicated backslash escaping in the source by constructing the
+  // escaped characters programmatically.
+  const specials = "*+?^${}()|[]\\/."; // characters that should be escaped
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    // Use String.fromCharCode(92) ("\\") to produce a literal backslash
+    // without embedding fragile escaped sequences in the source.
+    out += (specials.indexOf(ch) >= 0) ? String.fromCharCode(92) + ch : ch;
+  }
+  return out;
+}
+
+function makeSnippet(text, q, maxLen = 140) {
+  if (!q || !text) return '';
+  const t = String(text);
+  const tl = t.toLowerCase();
+  const tokens = q.trim().split(/\\s+/).filter(Boolean);
+  if (!tokens.length) return '';
+  let firstIdx = -1;
+  for (const tok of tokens) {
+    const idx = tl.indexOf(tok.toLowerCase());
+    if (idx >= 0 && (firstIdx === -1 || idx < firstIdx)) {
+      firstIdx = idx;
+    }
+  }
+  if (firstIdx === -1) return '';
+  const half = Math.floor(maxLen / 2);
+  let start = Math.max(0, firstIdx - Math.floor(half/2));
+  let end = Math.min(t.length, firstIdx + half);
+  if (end - start > maxLen) end = start + maxLen;
+  let snippetText = t.slice(start, end);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < t.length ? '…' : '';
+  const re = new RegExp('(' + tokens.map(escapeRegExp).join('|') + ')', 'gi');
+  const parts = snippetText.split(re);
+  const out = parts.map((part, i) => (i % 2 === 1) ? '<mark class="search-match">' + escHtml(part) + '</mark>' : escHtml(part)).join('');
+  return prefix + out + suffix;
+}
+
 function toggleGroup(gk) {
   if (collapsed.has(gk)) collapsed.delete(gk); else collapsed.add(gk);
   render();
@@ -2136,7 +2197,8 @@ function render() {
     item.ts.includes(q) ||
     (item.cwd    || '').toLowerCase().includes(q) ||
     (item.model  || '').toLowerCase().includes(q) ||
-    (item.prompt || '').toLowerCase().includes(q)
+    (item.prompt || '').toLowerCase().includes(q) ||
+    (item.search || '').toLowerCase().includes(q)
   );
 
   filtered.sort((a, b) => {
@@ -2190,6 +2252,21 @@ function render() {
         `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}"><a href="file://${escHtml(item.link)}#story">${item.has_story ? '📖' : ''}</a></td>` +
         `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
       frag.appendChild(tr);
+
+      // If a query is present, attempt to generate a highlighted snippet from the matched fields
+      if (q) {
+        let snippet = makeSnippet(item.search || '', q, 160) ||
+                      makeSnippet(item.prompt || '', q, 120) ||
+                      makeSnippet(item.cwd || '', q, 80) ||
+                      makeSnippet(item.model || '', q, 80) ||
+                      '';
+        if (snippet) {
+          const sTr = document.createElement('tr');
+          sTr.className = 'snippet-row';
+          sTr.innerHTML = `<td colspan="7">${snippet}</td>`;
+          frag.appendChild(sTr);
+        }
+      }
     }
   });
 
@@ -2229,7 +2306,8 @@ document.getElementById('btn-collapse').addEventListener('click', () => {
     item.ts.includes(q) ||
     (item.cwd    || '').toLowerCase().includes(q) ||
     (item.model  || '').toLowerCase().includes(q) ||
-    (item.prompt || '').toLowerCase().includes(q)
+    (item.prompt || '').toLowerCase().includes(q) ||
+    (item.search || '').toLowerCase().includes(q)
   ).forEach(item => {
     const gk = getGroupKey(item, sortCol);
     if (gk !== null) collapsed.add(gk);
@@ -2249,6 +2327,7 @@ def read_session(session_dir: Path) -> dict:
         "start_time": "",
         "cwd": "",
         "first_prompt": "",
+        "search_text": "",
         "model": "",
         "user_prompt_count": 0,
         "intent_count": 0,
@@ -2258,6 +2337,8 @@ def read_session(session_dir: Path) -> dict:
     }
 
     info["has_story"] = (session_dir / "story.txt").exists()
+
+    parts = []
 
     jsonl_path = session_dir / "events.jsonl"
     if not jsonl_path.exists():
@@ -2284,10 +2365,29 @@ def read_session(session_dir: Path) -> dict:
 
                 elif etype == "user.message":
                     info["user_prompt_count"] += 1
-                    if not info["first_prompt"]:
-                        content = data.get("content", "")
-                        if content:
+                    content = data.get("content", "")
+                    if content:
+                        parts.append(content)
+                        if not info["first_prompt"]:
                             info["first_prompt"] = abbreviate(content)
+
+                elif etype == "assistant.message":
+                    # Collect assistant reasoning and text for searching
+                    reasoning = data.get("reasoningText", "").strip()
+                    if reasoning:
+                        parts.append(reasoning)
+                    text = data.get("content", "").strip()
+                    if text:
+                        parts.append(text)
+                    # embedded tool requests (e.g., report_intent) inside assistant messages
+                    for tr in data.get("toolRequests", []):
+                        if tr.get("name") == "report_intent":
+                            intent_text = tr.get("arguments", {}).get("intent", "").strip()
+                            if intent_text:
+                                parts.append(intent_text)
+                        else:
+                            if tr.get("intentionSummary"):
+                                parts.append(tr.get("intentionSummary"))
 
                 elif not info["model"] and "model" in data:
                     info["model"] = data["model"]
@@ -2302,6 +2402,9 @@ def read_session(session_dir: Path) -> dict:
 
     except OSError:
         pass
+
+    # Concatenate collected text for searching; keep reasonably sized
+    info["search_text"] = abbreviate(" ".join(parts), max_len=1000)
 
     return info
 
@@ -2326,6 +2429,7 @@ def build_overview_html(sessions: list) -> str:
             "premium_requests": s["total_premium_requests"] or 0,
             "has_story": s["has_story"],
             "prompt": s["first_prompt"],
+            "search": s.get("search_text", ""),
             "link": str(s["events_html"]),
         })
 
@@ -2397,7 +2501,7 @@ def build_overview_html(sessions: list) -> str:
       <h1 class="page-title"><img src="{_FAVICON_URI}" style="height:1.2em;vertical-align:middle;margin-right:8px;"> Copilot Sessions</h1>
       <p class="page-meta">{count} sessions &nbsp;·&nbsp; generated {generated}</p>
       <div class="toolbar">
-        <input class="search-bar" type="search" placeholder="Filter by prompt, directory, or model…" id="search" autofocus>
+        <input class="search-bar" type="search" placeholder="Filter by prompt, directory, model, or conversation text…" id="search" autofocus>
         <button class="btn" id="btn-expand">Expand all</button>
         <button class="btn" id="btn-collapse">Collapse all</button>
       </div>
