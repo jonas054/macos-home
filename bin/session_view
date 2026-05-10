@@ -2278,7 +2278,7 @@ function render() {
         `<td class="premium-requests num" title="premium requests">${item.premium_requests ? escHtml(String(item.premium_requests)) : ''}</td>` +
         `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}"><a href="file://${escHtml(item.link)}#story">${item.has_story ? '📖' : ''}</a></td>` +
         `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
-      makeRowClickable(tr, `file://${item.link}`);
+      makeRowClickable(tr, `file://${item.link}#turns`);
       frag.appendChild(tr);
 
       // If a query is present and the prompt did not match, attempt to generate a highlighted snippet
@@ -2292,7 +2292,7 @@ function render() {
           const sTr = document.createElement('tr');
           sTr.className = 'snippet-row';
           sTr.innerHTML = `<td colspan="7">${snippet}</td>`;
-          makeRowClickable(sTr, `file://${item.link}`);
+          makeRowClickable(sTr, `file://${item.link}#turns`);
           frag.appendChild(sTr);
         }
       }
