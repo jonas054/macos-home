@@ -2088,11 +2088,12 @@ body {
 .mu-total td { border-top: 2px solid #e2e8f0; border-bottom: none; font-weight: 600; }
 /* Search snippet styling */
 .snippet-row td {
-  background: black;
-  color: white;
+  background: #fffbeb;
+  color: #334155;
   font-size: 13px;
-  padding: 8px 12px;
+  padding: 10px 12px 10px 14px;
   border-bottom: 1px solid #f1f5f9;
+  border-left: 3px solid #f59e0b;
   white-space: normal;
 }
 /* Add a white gap above a group header when it immediately follows a snippet row */
@@ -2100,9 +2101,9 @@ tr.snippet-row + tr.group-header td {
   border-top: 10px solid #fff;
 }
 mark.search-match {
-  background: goldenrod;
-  color: inherit;
-  padding: 0;
+  background: #fde68a;
+  color: #1e293b;
+  padding: 0 2px;
   border-radius: 3px;
 }
 .snippet-label {
