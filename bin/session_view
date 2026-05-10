@@ -1812,6 +1812,13 @@ del { color: #94a3b8; text-decoration: line-through; }
 }
 .back-link:hover { color: #2563eb; text-decoration: underline; }
 
+mark.search-hit {
+  background: #fde68a;
+  color: #1e293b;
+  padding: 0;
+  border-radius: 3px;
+}
+
 .tab-nav {
   display: flex;
   gap: 4px;
@@ -1910,6 +1917,99 @@ function copyCmd(btn, text) {
     setTimeout(() => { btn.textContent = prev; btn.classList.remove('copy-btn-ok'); }, 1500);
   });
 }
+
+function getSearchQuery() {
+  return new URL(window.location.href).searchParams.get('q') || '';
+}
+
+function escapeRegExp(s) {
+  const specials = "*+?^${}()|[]\\\\/.";
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    out += (specials.indexOf(ch) >= 0) ? String.fromCharCode(92) + ch : ch;
+  }
+  return out;
+}
+
+function highlightSearchInNode(root, query) {
+  const tokens = query.trim().split(/\\s+/).filter(Boolean);
+  if (!tokens.length || !root) return 0;
+
+  const re = new RegExp('(' + tokens.map(escapeRegExp).join('|') + ')', 'gi');
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest('mark.search-hit')) return NodeFilter.FILTER_REJECT;
+      if (['SCRIPT', 'STYLE', 'MARK'].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
+      re.lastIndex = 0;
+      return re.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  let hitCount = 0;
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    const parent = node.parentNode;
+    if (!parent) continue;
+    re.lastIndex = 0;
+    const parts = text.split(re);
+    if (parts.length === 1) continue;
+
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (!part) continue;
+      if (i % 2 === 1) {
+        const mark = document.createElement('mark');
+        mark.className = 'search-hit';
+        mark.textContent = part;
+        frag.appendChild(mark);
+        hitCount += 1;
+      } else {
+        frag.appendChild(document.createTextNode(part));
+      }
+    }
+    parent.replaceChild(frag, node);
+
+    let details = parent.nodeType === Node.ELEMENT_NODE ? parent.closest('details') : null;
+    while (details) {
+      details.open = true;
+      details = details.parentElement ? details.parentElement.closest('details') : null;
+    }
+  }
+
+  return hitCount;
+}
+
+function applySearchQueryToTurns() {
+  const query = getSearchQuery();
+  if (!query) return;
+
+  const backLink = document.querySelector('.back-link');
+  if (backLink) {
+    const url = new URL(backLink.href);
+    url.searchParams.set('q', query);
+    backLink.href = url.toString();
+  }
+
+  const turnsPanel = document.getElementById('panel-turns');
+  if (!turnsPanel) return;
+
+  const hits = highlightSearchInNode(turnsPanel, query);
+  if (hits > 0) {
+    showTab('turns', false);
+    const firstHit = turnsPanel.querySelector('mark.search-hit');
+    if (firstHit) firstHit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+applySearchQueryToTurns();
 """
 
 
@@ -2210,6 +2310,25 @@ function makeRowClickable(tr, href) {
   });
 }
 
+function buildSessionHref(path, hash) {
+  const url = new URL(`file://${path}`);
+  if (query) url.searchParams.set('q', query);
+  if (hash) url.hash = hash;
+  return url.toString();
+}
+
+function syncSearchUrl(value) {
+  const url = new URL(window.location.href);
+  if (value) url.searchParams.set('q', value);
+  else url.searchParams.delete('q');
+  history.replaceState(null, '', url);
+}
+
+function loadSearchFromUrl() {
+  const url = new URL(window.location.href);
+  return url.searchParams.get('q') || '';
+}
+
 function toggleGroup(gk) {
   if (collapsed.has(gk)) collapsed.delete(gk); else collapsed.add(gk);
   render();
@@ -2269,6 +2388,8 @@ function render() {
       if (gk !== null) tr.dataset.group = gk;
       const promptText = item.prompt || '';
       const promptMatched = q && promptText.toLowerCase().includes(q);
+      const sessionHref = buildSessionHref(item.link, 'turns');
+      const storyHref = buildSessionHref(item.link, 'story');
       const promptHtml = promptText ? (promptMatched ? highlightText(promptText, q) : escHtml(promptText)) : '<em>\\u2014</em>';
       tr.innerHTML =
         `<td class="ts">${escHtml(item.ts)}</td>` +
@@ -2276,9 +2397,9 @@ function render() {
         `<td class="model">${escHtml(item.model)}</td>` +
         `<td class="activity" title="user prompts + agent intents">${escHtml(item.activity)}</td>` +
         `<td class="premium-requests num" title="premium requests">${item.premium_requests ? escHtml(String(item.premium_requests)) : ''}</td>` +
-        `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}"><a href="file://${escHtml(item.link)}#story">${item.has_story ? '📖' : ''}</a></td>` +
-        `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
-      makeRowClickable(tr, `file://${item.link}#turns`);
+        `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}"><a href="${escHtml(storyHref)}">${item.has_story ? '📖' : ''}</a></td>` +
+        `<td class="prompt"><a href="${escHtml(sessionHref)}">${promptHtml}</a></td>`;
+      makeRowClickable(tr, sessionHref);
       frag.appendChild(tr);
 
       // If a query is present and the prompt did not match, attempt to generate a highlighted snippet
@@ -2292,7 +2413,7 @@ function render() {
           const sTr = document.createElement('tr');
           sTr.className = 'snippet-row';
           sTr.innerHTML = `<td colspan="7">${snippet}</td>`;
-          makeRowClickable(sTr, `file://${item.link}#turns`);
+          makeRowClickable(sTr, sessionHref);
           frag.appendChild(sTr);
         }
       }
@@ -2325,6 +2446,13 @@ document.querySelectorAll('#sessions-table th[data-col]').forEach(th => {
 
 document.getElementById('search').addEventListener('input', e => {
   query = e.target.value;
+  syncSearchUrl(query);
+  render();
+});
+
+window.addEventListener('popstate', () => {
+  query = loadSearchFromUrl();
+  document.getElementById('search').value = query;
   render();
 });
 
@@ -2349,6 +2477,8 @@ document.getElementById('btn-collapse').addEventListener('click', () => {
   render();
 });
 
+query = loadSearchFromUrl();
+document.getElementById('search').value = query;
 render();
 """
 
