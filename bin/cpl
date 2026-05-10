@@ -1,0 +1,3 @@
+#!/bin/sh
+
+EDITOR="emacs -nw" copilot --yolo 
