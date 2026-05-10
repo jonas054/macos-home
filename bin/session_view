@@ -2049,6 +2049,7 @@ body {
 .sessions-table th.sort-active { color: #6366f1; }
 .sort-ind { opacity: .55; }
 .sessions-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+.data-row { cursor: pointer; }
 .data-row:hover td { background: #f8fafc; }
 .ts { white-space: nowrap; color: #64748b; font-variant-numeric: tabular-nums; }
 .cwd { white-space: nowrap; color: #64748b; font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
@@ -2096,6 +2097,8 @@ body {
   border-left: 3px solid #f59e0b;
   white-space: normal;
 }
+.snippet-row { cursor: pointer; }
+.snippet-row:hover td { background: #fef3c7; }
 /* Add a white gap above a group header when it immediately follows a snippet row */
 tr.snippet-row + tr.group-header td {
   border-top: 10px solid #fff;
@@ -2103,7 +2106,7 @@ tr.snippet-row + tr.group-header td {
 mark.search-match {
   background: #fde68a;
   color: #1e293b;
-  padding: 0 2px;
+  padding: 0;
   border-radius: 3px;
 }
 .snippet-label {
@@ -2200,6 +2203,13 @@ function highlightText(text, q) {
   return parts.map((part, i) => (i % 2 === 1) ? '<mark class="search-match">' + escHtml(part) + '</mark>' : escHtml(part)).join('');
 }
 
+function makeRowClickable(tr, href) {
+  tr.addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    window.location.href = href;
+  });
+}
+
 function toggleGroup(gk) {
   if (collapsed.has(gk)) collapsed.delete(gk); else collapsed.add(gk);
   render();
@@ -2268,6 +2278,7 @@ function render() {
         `<td class="premium-requests num" title="premium requests">${item.premium_requests ? escHtml(String(item.premium_requests)) : ''}</td>` +
         `<td class="story-indicator" title="${item.has_story ? 'Story available' : 'No story'}"><a href="file://${escHtml(item.link)}#story">${item.has_story ? '📖' : ''}</a></td>` +
         `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
+      makeRowClickable(tr, `file://${item.link}`);
       frag.appendChild(tr);
 
       // If a query is present and the prompt did not match, attempt to generate a highlighted snippet
@@ -2281,6 +2292,7 @@ function render() {
           const sTr = document.createElement('tr');
           sTr.className = 'snippet-row';
           sTr.innerHTML = `<td colspan="7">${snippet}</td>`;
+          makeRowClickable(sTr, `file://${item.link}`);
           frag.appendChild(sTr);
         }
       }
