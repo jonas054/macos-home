@@ -2098,7 +2098,7 @@ body {
 mark.search-match {
   background: #fff4cc;
   color: inherit;
-  padding: 0 3px;
+  padding: 0;
   border-radius: 3px;
 }
 .snippet-label {
@@ -2185,6 +2185,16 @@ function makeSnippet(text, q, maxLen = 140) {
   return prefix + out + suffix;
 }
 
+function highlightText(text, q) {
+  if (!q || !text) return escHtml(text);
+  const t = String(text);
+  const tokens = q.trim().split(/\\s+/).filter(Boolean);
+  if (!tokens.length) return escHtml(text);
+  const re = new RegExp('(' + tokens.map(escapeRegExp).join('|') + ')', 'gi');
+  const parts = t.split(re);
+  return parts.map((part, i) => (i % 2 === 1) ? '<mark class="search-match">' + escHtml(part) + '</mark>' : escHtml(part)).join('');
+}
+
 function toggleGroup(gk) {
   if (collapsed.has(gk)) collapsed.delete(gk); else collapsed.add(gk);
   render();
@@ -2242,7 +2252,9 @@ function render() {
       const tr = document.createElement('tr');
       tr.className = 'data-row';
       if (gk !== null) tr.dataset.group = gk;
-      const promptHtml = item.prompt ? escHtml(item.prompt) : '<em>\\u2014</em>';
+      const promptText = item.prompt || '';
+      const promptMatched = q && promptText.toLowerCase().includes(q);
+      const promptHtml = promptText ? (promptMatched ? highlightText(promptText, q) : escHtml(promptText)) : '<em>\\u2014</em>';
       tr.innerHTML =
         `<td class="ts">${escHtml(item.ts)}</td>` +
         `<td class="cwd" title="${escHtml(item.cwd)}">${escHtml(item.cwd_display)}</td>` +
@@ -2253,8 +2265,8 @@ function render() {
         `<td class="prompt"><a href="file://${escHtml(item.link)}">${promptHtml}</a></td>`;
       frag.appendChild(tr);
 
-      // If a query is present, attempt to generate a highlighted snippet from the matched fields
-      if (q) {
+      // If a query is present and the prompt did not match, attempt to generate a highlighted snippet
+      if (q && !promptMatched) {
         let snippet = makeSnippet(item.search || '', q, 160) ||
                       makeSnippet(item.prompt || '', q, 120) ||
                       makeSnippet(item.cwd || '', q, 80) ||
