@@ -2088,15 +2088,19 @@ body {
 .mu-total td { border-top: 2px solid #e2e8f0; border-bottom: none; font-weight: 600; }
 /* Search snippet styling */
 .snippet-row td {
-  background: #ffffff;
-  color: #475569;
+  background: black;
+  color: white;
   font-size: 13px;
   padding: 8px 12px;
   border-bottom: 1px solid #f1f5f9;
   white-space: normal;
 }
+/* Add a white gap above a group header when it immediately follows a snippet row */
+tr.snippet-row + tr.group-header td {
+  border-top: 10px solid #fff;
+}
 mark.search-match {
-  background: #fff4cc;
+  background: goldenrod;
   color: inherit;
   padding: 0;
   border-radius: 3px;
