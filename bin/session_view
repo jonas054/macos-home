@@ -2301,6 +2301,11 @@ function render() {
 
   document.querySelector('#sessions-table tbody').replaceChildren(frag);
 
+  const modelUsage = document.getElementById('model-usage');
+  if (modelUsage) {
+    modelUsage.style.display = q ? 'none' : '';
+  }
+
   document.querySelectorAll('#sessions-table th[data-col]').forEach(th => {
     const col = parseInt(th.dataset.col);
     th.classList.toggle('sort-active', col === sortCol);
@@ -2496,7 +2501,7 @@ def build_overview_html(sessions: list) -> str:
                 f"</tr>"
             )
         model_usage_html = f"""
-    <div class="overview-section mu-section">
+    <div class="overview-section mu-section" id="model-usage">
       <h2 class="mu-title">🧮 Model usage</h2>
       <table class="mu-table">
         <thead><tr>
