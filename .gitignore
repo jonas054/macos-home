@@ -2,6 +2,7 @@
 .DS_Store
 .bundle/
 .cache/
+.cargo/
 .config/
 .copilot/
 .cups/
@@ -21,6 +22,7 @@
 .local/
 .npm/
 .rbenv/
+.rustup/
 .ssh/
 .viminfo
 .zsh_history
