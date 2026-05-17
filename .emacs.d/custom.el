@@ -7,7 +7,7 @@
  ;; If there is more than one, they won't work right.
  '(package-selected-packages
    '(adoc-mode copilot doom-themes flycheck-kotlin inf-ruby kotlin-mode lsp-mode
-	       magit markdown-mode rustic mixed-pitch org-modern transpose-frame typescript-mode yaml-mode))
+	       magit markdown-mode rustic swift-mode mixed-pitch org-modern transpose-frame typescript-mode yaml-mode))
  '(safe-local-variable-values '((whitespace-line-column 100))))
 ;;(custom-set-faces
  ;; custom-set-faces was added by Custom.
