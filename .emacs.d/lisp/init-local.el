@@ -204,6 +204,8 @@
 
 ;; Use ido to open a minibuffer with the guessed path as default
 ;; Note: Doesn't seem to work!
+
+(require 'ffap)
 (defun ido-find-file-at-point-by-default ()
   "Use ido to open the file at point, with the guessed path as default."
   (interactive)
