@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
-# launcher - calls the session_view script in dev/session-view
-exec python3 /Users/jonas/dev/session-view/session_view.py "$@"
+# launcher - calls the session_view script in its own repo
+exec python3 $HOME/dev/session-view/session_view.py "$@"
