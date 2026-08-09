@@ -15,7 +15,7 @@ import sys
 import time
 import tempfile
 
-WHITE_LIST = r'(\.(java|erl|erh|py|pl|pm|rb|xml|yml|rcw|cfg|cmake|mk|mak|js|ts|kt|sh|cpp|hh|h|c|cc)|^[MR]akefile)$'
+WHITE_LIST = r'(\.(java|erl|erh|py|pl|pm|rb|xml|yml|rcw|cfg|cmake|mk|mak|js|tsx?|kt|sh|cpp|hh|h|c|cc)|^[MR]akefile)$'
 BLACK_LIST = r'/\.|_flymake|\.bundle|#|~|target|workspace.xml'
 SLEEP_TIME = 0.5
 
