@@ -2,10 +2,13 @@
 #
 
 USAGE = <<~USAGE
-  Usage: percent_of_month [-r|--remaining] [-h|--help] [--test]
+  Usage: percent_of_month [-r|--remaining] [-h|--help] [--test] [used_credits total_credits]
 
   Outputs the percentage of the current month that has elapsed or is remaining,
   based on both calendar days and workdays (Mon–Fri, excluding Swedish public holidays).
+
+  If used_credits and total_credits are provided, it will also output the percentage
+  of AI credits consumed or remaining.
 
   Options:
     -r, --remaining   Show percentage remaining (default: elapsed)
@@ -108,15 +111,28 @@ def report(only_workdays, show_remaining_time, now = Time.now)
   "#{percent}% #{direction} of the month (#{which_days})"
 end
 
-puts Time.now.strftime('%Y-%m-%d (%A) %H:%M:%S')
-show_remaining_time = %w[-r --remaining].any? { |arg| ARGV.include?(arg) }
-puts report(false, show_remaining_time)
-puts report(true, show_remaining_time)
+def main
+  puts Time.now.strftime('%Y-%m-%d (%A) %H:%M:%S')
+  show_remaining = %w[-r --remaining].any? { |arg| ARGV.include?(arg) }
+  puts report(false, show_remaining)
+  puts report(true, show_remaining)
+  numeric_args = ARGV.select { |arg| arg.to_i > 0 }.map { _1.chars.grep(/\d/).join.to_i }
+  return if numeric_args.none?
+
+  consumed = numeric_args[0].to_i * 100.0 / numeric_args[1].to_i
+  if show_remaining
+    puts "#{(100 - consumed).round(1)}% AI credits remaining"
+  else
+    puts "#{consumed.round(1)}% AI credits consumed"
+  end
+end
 
 # Run tests if --test flag is given
 # ----------------------------------------------------------------------
 
-if ARGV.include?('--test')
+unless ARGV.include?('--test') # rubocop:disable Style/UnlessElse
+  main
+else
   ARGV.shift # Remove --test to avoid interference with test/unit
   begin
     require 'test/unit'
