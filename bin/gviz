@@ -1,0 +1,472 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'open-uri'
+require 'optparse'
+require 'fileutils'
+require 'set'
+
+CACHE_DIR = File.expand_path('~/.cache/gviz')
+D3_URL    = 'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js'
+DAGRE_URL = 'https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js'
+
+def parse_args
+  options = { limit: 100 }
+  OptionParser.new do |opts|
+    opts.banner = 'Usage: gviz [-n COUNT]'
+    opts.on('-n', '--limit N', Integer, 'Number of commits to show (default: 100)') do |n|
+      options[:limit] = n
+    end
+  end.parse!
+  options
+end
+
+def fetch_git_log(limit)
+  fmt = '%H%n%P%n%s%n%an%n%cr'
+  output = `git log --all --topo-order -n #{limit} -z --format="#{fmt}" 2>&1`
+  abort "Not a git repository or git not found:\n#{output.strip}" unless $?.success?
+  output
+end
+
+def parse_commits(raw)
+  raw.split("\0").filter_map do |record|
+    record = record.lstrip
+    next if record.empty?
+
+    lines = record.split("\n", 5)
+    next if lines.size < 4
+
+    full_hash = lines[0].strip
+    next if full_hash.empty?
+
+    parents = lines[1].strip.split.map { _1[0, 7] }
+    {
+      id: full_hash[0, 7],
+      parents: parents,
+      subject: lines[2],
+      author: lines[3],
+      date: lines[4].to_s.strip,
+      refs: [],
+      is_merge: parents.size > 1,
+      is_head: false
+    }
+  end
+end
+
+def ref_type(full_refname)
+  return 'remote' if full_refname.start_with?('refs/remotes/')
+  return 'tag'    if full_refname.start_with?('refs/tags/')
+
+  'local'
+end
+
+def add_ref_to_map(map, obj, deref, short, full)
+  hash = (deref.nil? || deref.empty? ? obj : deref)[0, 7]
+  type = ref_type(full)
+  return if type == 'remote' && short.end_with?('/HEAD')
+
+  map[hash] << { name: short, type: type }
+end
+
+def parse_for_each_ref
+  map = Hash.new { |h, k| h[k] = [] }
+  fmt = '%(objectname:short)%09%(*objectname:short)%09%(refname:short)%09%(refname)'
+  raw = `git for-each-ref --format='#{fmt}' refs/heads refs/remotes refs/tags 2>/dev/null`
+  raw.each_line do |line|
+    obj, deref, short, full = line.chomp.split("\t", 4)
+    next unless full
+
+    add_ref_to_map(map, obj, deref, short, full)
+  end
+  map
+end
+
+def attach_head_ref(map)
+  head_hash = `git rev-parse --short HEAD 2>/dev/null`.strip
+  return if head_hash.empty?
+
+  branch = `git symbolic-ref --short HEAD 2>/dev/null`.strip
+  if branch.empty?
+    map[head_hash] << { name: 'HEAD', type: 'head' }
+  else
+    existing = map[head_hash].find { _1[:name] == branch }
+    if existing
+      existing[:type] = 'head_branch'
+    else
+      map[head_hash] << { name: branch, type: 'head_branch' }
+    end
+  end
+end
+
+def build_refs_map
+  map = parse_for_each_ref
+  attach_head_ref(map)
+  map
+end
+
+def attach_refs(commits, refs_map)
+  commits.each do |c|
+    c[:refs] = refs_map[c[:id]] || []
+    c[:is_head] = c[:refs].any? { %w[head head_branch].include?(_1[:type]) }
+  end
+end
+
+def load_js(filename, url)
+  FileUtils.mkdir_p(CACHE_DIR)
+  cache_path = File.join(CACHE_DIR, filename)
+  return File.read(cache_path) if File.exist?(cache_path)
+
+  $stderr.print "Fetching #{filename} (cached for future runs)... "
+  content = URI.open(url, &:read) # rubocop:disable Security/Open
+  File.write(cache_path, content)
+  warn 'done.'
+  content
+end
+
+def build_stash_map
+  map = {}
+  raw = `git stash list --format="%H %gd" 2>/dev/null`
+  raw.each_line do |line|
+    parts = line.strip.split(' ', 2)
+    next if parts.size < 2
+
+    full_hash, stash_name = parts
+    map[full_hash[0, 7]] = stash_name
+    # Mark internal parents (index commit + optional untracked commit)
+    `git log -1 --format="%P" #{full_hash} 2>/dev/null`.strip.split[1..].each do |p|
+      map[p[0, 7]] = nil unless map.key?(p[0, 7])
+    end
+  end
+  map
+end
+
+def attach_stash(commits, stash_map)
+  commits.each do |c|
+    next unless stash_map.key?(c[:id])
+
+    c[:is_stash] = true
+    c[:stash_name] = stash_map[c[:id]]
+  end
+end
+
+def commit_to_node(commit)
+  { id: commit[:id], subject: commit[:subject], author: commit[:author], date: commit[:date],
+    refs: commit[:refs], parents: commit[:parents],
+    isMerge: commit[:is_merge], isHead: commit[:is_head], isTruncated: false,
+    isStash: commit[:is_stash] || false, stashName: commit[:stash_name] }
+end
+
+def add_truncated_placeholders(nodes, commits)
+  known = Set.new(commits.map { _1[:id] })
+  commits.each do |c|
+    c[:parents].each do |p|
+      next if known.include?(p)
+      next if nodes.any? { _1[:id] == p }
+
+      nodes << { id: p, subject: '', author: '', date: '', refs: [], parents: [],
+                 isMerge: false, isHead: false, isTruncated: true,
+                 isStash: false, stashName: nil }
+    end
+  end
+end
+
+def build_graph_nodes(commits)
+  nodes = commits.map { commit_to_node(_1) }
+  add_truncated_placeholders(nodes, commits)
+  nodes
+end
+
+GRAPH_JS = <<~JS
+  (function () {
+    const NODE_R = 16;
+    const PALETTE = [
+      '#1971c2','#2f9e44','#e03131','#7048e8','#e67700',
+      '#0c8599','#c2255c','#5c7cfa','#37b24d','#f76707',
+      '#364fc7','#087f5b','#862e9c','#a61e4d','#5c940d'
+    ];
+
+    function branchKey(ref) {
+      return ref.type === 'remote' ? ref.name.split('/').slice(1).join('/') : ref.name;
+    }
+
+    function buildColorMap(nodes) {
+      const map = {};
+      let idx = 0;
+      nodes.forEach(n => n.refs.forEach(r => {
+        const k = branchKey(r);
+        if (!(k in map)) map[k] = PALETTE[idx++ % PALETTE.length];
+      }));
+      return map;
+    }
+
+    function nodeColor(n, colorMap) {
+      if (n.isStash) return '#e67700';
+      const ref = n.refs.find(r =>
+        r.type === 'head_branch' || r.type === 'head' || r.type === 'local'
+      ) || n.refs.find(r => r.type === 'remote');
+      return ref ? (colorMap[branchKey(ref)] || '#adb5bd') : '#adb5bd';
+    }
+
+    function buildLayout(nodes) {
+      const g = new dagre.graphlib.Graph({ multigraph: false });
+      g.setGraph({ rankdir: 'TB', nodesep: 50, ranksep: 65, marginx: 60, marginy: 60 });
+      g.setDefaultEdgeLabel(() => ({}));
+      const ids = new Set(nodes.map(n => n.id));
+      const LABEL_W = NODE_R * 2 + 8 + 30 * 6.5; // circle + gap + 30-char label
+      nodes.forEach(n => g.setNode(n.id, {
+        width: n.isTruncated ? NODE_R * 2 : LABEL_W,
+        height: NODE_R * 2
+      }));
+      nodes.forEach(n => n.parents.forEach(p => { if (ids.has(p)) g.setEdge(n.id, p); }));
+      dagre.layout(g);
+      return g;
+    }
+
+    function esc(s) {
+      return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                      .replace(/"/g,'&quot;');
+    }
+
+    function refColors(ref, colorMap) {
+      const col = ref.type === 'tag'
+        ? '#f08c00'
+        : (colorMap[branchKey(ref)] || '#adb5bd');
+      const bg = ref.type === 'tag' ? '#fff3bf'
+               : ref.type === 'remote' ? '#f1f3f5'
+               : col + '22';
+      const fg = ref.type === 'tag' ? '#864d0e'
+               : ref.type === 'remote' ? '#868e96'
+               : col;
+      return { col, bg, fg };
+    }
+
+    function render() {
+      const colorMap = buildColorMap(graphData);
+      const g = buildLayout(graphData);
+
+      const svg = d3.select('#graph');
+      const layer = d3.select('#zoom-layer');
+      const zoom = d3.zoom().scaleExtent([0.05, 6])
+        .on('zoom', ev => layer.attr('transform', ev.transform));
+      svg.call(zoom);
+
+      // Edges
+      const edgeLayer = layer.append('g');
+      g.edges().forEach(e => {
+        const pts = g.edge(e).points;
+        edgeLayer.append('path')
+          .attr('class', 'edge')
+          .attr('d', d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis)(pts))
+          .attr('marker-end', 'url(#arrow)');
+      });
+
+      // Nodes
+      const nodeLayer = layer.append('g');
+      const tooltip = document.getElementById('tooltip');
+
+      graphData.forEach(n => {
+        const gn = g.node(n.id);
+        if (!gn) return;
+        const { x, y } = gn;
+        const color = n.isTruncated ? '#ced4da' : nodeColor(n, colorMap);
+        const grp = nodeLayer.append('g').attr('transform', `translate(${x},${y})`);
+
+        if (n.isMerge) {
+          grp.append('circle').attr('r', NODE_R + 5)
+            .attr('fill', 'none').attr('stroke', color)
+            .attr('stroke-width', 1.5).attr('opacity', 0.35);
+        }
+
+        grp.append('circle').attr('class', 'node-circle').attr('r', NODE_R)
+          .attr('fill', n.isHead ? color : (n.isTruncated ? '#f8f9fa' : 'white'))
+          .attr('stroke', color).attr('stroke-width', n.isHead ? 0 : 2)
+          .attr('stroke-dasharray', (n.isTruncated || n.isStash) ? '3,2' : null);
+
+        grp.append('text')
+          .attr('text-anchor', 'middle').attr('dy', '0.35em')
+          .attr('font-size', 7).attr('font-family', 'monospace')
+          .attr('fill', n.isHead ? 'white' : '#495057').attr('pointer-events', 'none')
+          .text(n.isTruncated ? '…' : n.id);
+
+        // Build badge list: stash badge first, then regular ref badges
+        const badges = [];
+        if (n.isStash && n.stashName) {
+          badges.push({ label: n.stashName, col: '#e67700', bg: '#fff3bf', fg: '#864d0e',
+                        italic: false });
+        }
+        n.refs.filter(r => r.type !== 'head').forEach(ref => {
+          const { col, bg, fg } = refColors(ref, colorMap);
+          badges.push({ label: ref.name, col, bg, fg, italic: ref.type === 'remote' });
+        });
+
+        badges.forEach((badge, i) => {
+          const tw = badge.label.length * 5.5;
+          const bx = NODE_R + 8;
+          const by = (i - (badges.length - 1) / 2) * 15;
+          const badgeG = grp.append('g').attr('transform', `translate(${bx},${by})`);
+          badgeG.append('rect')
+            .attr('x', 0).attr('y', -7).attr('width', tw + 8).attr('height', 14)
+            .attr('rx', 3).attr('fill', badge.bg)
+            .attr('stroke', badge.col).attr('stroke-width', 0.5);
+          badgeG.append('text')
+            .attr('x', 4).attr('y', 0)
+            .attr('font-size', 9).attr('font-family', 'monospace').attr('font-weight', '600')
+            .attr('dominant-baseline', 'middle')
+            .attr('fill', badge.fg)
+            .attr('font-style', badge.italic ? 'italic' : 'normal')
+            .text(badge.label);
+        });
+
+        if (!n.isTruncated && n.subject) {
+          const subjectY = badges.length > 0
+            ? Math.ceil((badges.length - 1) / 2) * 15 + 13
+            : 4;
+          const label = n.subject.length > 30 ? n.subject.slice(0, 30) + '…' : n.subject;
+          grp.append('text')
+            .attr('x', NODE_R + 8).attr('y', subjectY)
+            .attr('dominant-baseline', 'middle')
+            .attr('font-size', 11).attr('fill', '#495057')
+            .attr('pointer-events', 'none')
+            .text(label);
+        }
+
+        grp
+          .on('mouseover', function (event) {
+            const stashHtml = n.isStash && n.stashName
+              ? `<span class="t-badge" style="background:#fff3bf;color:#864d0e;` +
+                `border:1px solid #e67700">${esc(n.stashName)}</span>`
+              : '';
+            const refsHtml = n.refs.map(r => {
+              const { col, bg, fg } = refColors(r, colorMap);
+              return `<span class="t-badge" style="background:${bg};color:${fg};` +
+                     `border:1px solid ${col}">${esc(r.name)}</span>`;
+            }).join('');
+            const allBadges = [stashHtml, refsHtml].filter(Boolean).join('');
+            tooltip.style.display = 'block';
+            tooltip.innerHTML =
+              `<div class="t-hash">${esc(n.id)}</div>` +
+              `<div class="t-subject">${esc(n.subject || '(history truncated)')}</div>` +
+              (n.author
+                ? `<div class="t-meta">👤 ${esc(n.author)} &nbsp;·&nbsp; 🕐 ${esc(n.date)}</div>`
+                : '') +
+              (allBadges ? `<div class="t-refs">${allBadges}</div>` : '');
+            positionTooltip(event);
+          })
+          .on('mousemove', positionTooltip)
+          .on('mouseout', () => { tooltip.style.display = 'none'; });
+      });
+
+      // Initial fit-to-screen
+      const gg = g.graph();
+      const vw = svg.node().clientWidth, vh = svg.node().clientHeight;
+      const gw = gg.width || 400, gh = gg.height || 400;
+      const scale = Math.min(1.2, Math.min(vw / (gw + 120), vh / (gh + 120)));
+      svg.call(zoom.transform,
+        d3.zoomIdentity.translate((vw - gw * scale) / 2, 40).scale(scale));
+    }
+
+    function positionTooltip(event) {
+      const tt = document.getElementById('tooltip');
+      const m = 16;
+      let x = event.clientX + m, y = event.clientY + m;
+      if (x + tt.offsetWidth > window.innerWidth) x = event.clientX - tt.offsetWidth - m;
+      if (y + tt.offsetHeight > window.innerHeight) y = event.clientY - tt.offsetHeight - m;
+      tt.style.left = x + 'px';
+      tt.style.top = y + 'px';
+    }
+
+    render();
+  }());
+JS
+
+# rubocop:disable Metrics/MethodLength
+def generate_html(commits, d3_js, dagre_js)
+  nodes_json = JSON.generate(build_graph_nodes(commits))
+
+  <<~HTML
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Git graph — #{File.basename(Dir.pwd)}</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: #f8f9fa;
+        }
+        #container { width: 100vw; height: 100vh; overflow: hidden; }
+        svg { width: 100%; height: 100%; }
+        .edge { fill: none; stroke: #ced4da; stroke-width: 1.5; }
+        .node-circle { cursor: pointer; transition: opacity 0.1s; }
+        .node-circle:hover { opacity: 0.8; }
+        #tooltip {
+          position: fixed; background: white; border: 1px solid #dee2e6;
+          border-radius: 8px; padding: 10px 14px; font-size: 12px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.12); pointer-events: none;
+          display: none; max-width: 380px; z-index: 100;
+        }
+        .t-hash { font-family: monospace; color: #c92a2a; font-size: 11px; margin-bottom: 4px; }
+        .t-subject { font-weight: 600; color: #212529; margin-bottom: 6px; line-height: 1.4; }
+        .t-meta { color: #6c757d; font-size: 11px; margin-bottom: 4px; }
+        .t-refs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+        .t-badge {
+          font-size: 10px; font-family: monospace;
+          padding: 2px 6px; border-radius: 3px; font-weight: 600;
+        }
+        #hint {
+          position: fixed; bottom: 12px; right: 14px;
+          font-size: 11px; color: #adb5bd; pointer-events: none;
+        }
+      </style>
+    </head>
+    <body>
+      <div id="container">
+        <svg id="graph">
+          <defs>
+            <marker id="arrow" markerWidth="7" markerHeight="7"
+                    refX="7" refY="3.5" orient="auto">
+              <polygon points="0 0, 7 3.5, 0 7" fill="#ced4da"/>
+            </marker>
+          </defs>
+          <g id="zoom-layer"></g>
+        </svg>
+      </div>
+      <div id="tooltip"></div>
+      <div id="hint">scroll to zoom · drag to pan</div>
+      <script>#{d3_js}</script>
+      <script>#{dagre_js}</script>
+      <script>const graphData = #{nodes_json};</script>
+      <script>#{GRAPH_JS}</script>
+    </body>
+    </html>
+  HTML
+end
+# rubocop:enable Metrics/MethodLength
+
+def main
+  options = parse_args
+
+  raw = fetch_git_log(options[:limit])
+  commits = parse_commits(raw)
+  abort 'No commits found.' if commits.empty?
+
+  refs_map = build_refs_map
+  attach_refs(commits, refs_map)
+
+  stash_map = build_stash_map
+  attach_stash(commits, stash_map)
+
+  d3_js    = load_js('d3.min.js',    D3_URL)
+  dagre_js = load_js('dagre.min.js', DAGRE_URL)
+
+  puts "Generating visualization for #{commits.size} commits..."
+  html = generate_html(commits, d3_js, dagre_js)
+
+  output = '/tmp/gviz.html'
+  File.write(output, html)
+  puts "Opening #{output}..."
+  system('open', output)
+end
+
+main
